@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sentinel — ANPR Command Center</title>
+    <meta name="description" content="Real-time ANPR surveillance dashboard with live camera feeds, plate detection alerts, and spatial analytics.">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <style>
+        /* ─────────────── Design Tokens ─────────────── */
+        :root {
+            --bg-primary:     #0a0e17;
+            --bg-secondary:   #111827;
+            --bg-card:        rgba(17, 24, 39, 0.75);
+            --bg-glass:       rgba(17, 24, 39, 0.55);
+            --border-subtle:  rgba(255, 255, 255, 0.06);
+            --border-glow:    rgba(99, 102, 241, 0.3);
+
+            --text-primary:   #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted:     #64748b;
+
+            --accent-indigo:  #818cf8;
+            --accent-blue:    #60a5fa;
+            --accent-cyan:    #22d3ee;
+            --accent-emerald: #34d399;
+            --accent-amber:   #fbbf24;
+            --accent-rose:    #fb7185;
+            --accent-purple:  #a78bfa;
+
+            --gradient-hero:  linear-gradient(135deg, #818cf8 0%, #22d3ee 50%, #34d399 100%);
+            --gradient-card:  linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(34,211,153,0.04) 100%);
+
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --radius-xl: 20px;
+
+            --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--border-subtle);
+            --shadow-glow: 0 0 30px rgba(99, 102, 241, 0.15);
+
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+            --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        /* ─────────────── Reset & Base ─────────────── */
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html { font-size: 14px; }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+            min-height: 100vh;
+        }
+
+        /* Animated background mesh */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(ellipse 80% 60% at 20% 10%, rgba(99, 102, 241, 0.08) 0%, transparent 60%),
+                radial-gradient(ellipse 60% 50% at 80% 90%, rgba(34, 211, 153, 0.06) 0%, transparent 60%),
+                radial-gradient(ellipse 50% 40% at 50% 50%, rgba(34, 211, 238, 0.04) 0%, transparent 60%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* ─────────────── Layout ─────────────── */
+        .app {
+            position: relative;
+            z-index: 1;
+            display: grid;
+            grid-template-rows: auto 1fr;
+            min-height: 100vh;
+        }
+
+        /* ─────────────── Header ─────────────── */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 28px;
+            background: var(--bg-glass);
+            backdrop-filter: blur(20px) saturate(1.4);
+            border-bottom: 1px solid var(--border-subtle);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .logo {
+            width: 36px;
+            height: 36px;
+            border-radius: var(--radius-sm);
+            background: var(--gradient-hero);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: 800;
+            color: var(--bg-primary);
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+        }
+
+        .brand {
+            font-size: 1.3rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            background: var(--gradient-hero);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .brand-sub {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-weight: 400;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .connection-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            background: rgba(34, 211, 153, 0.1);
+            color: var(--accent-emerald);
+            border: 1px solid rgba(34, 211, 153, 0.2);
+            transition: var(--transition);
+        }
+
+        .connection-badge.disconnected {
+            background: rgba(251, 113, 133, 0.1);
+            color: var(--accent-rose);
+            border-color: rgba(251, 113, 133, 0.2);
+        }
+
+        .pulse-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.8); }
+        }
+
+        /* ─────────────── Main Content ─────────────── */
+        .main {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            grid-template-rows: auto 1fr;
+            gap: 20px;
+            padding: 20px 28px;
+            max-height: calc(100vh - 68px);
+            overflow: hidden;
+        }
+
+        /* ─────────────── Stats Bar ─────────────── */
+        .stats-bar {
+            grid-column: 1 / -1;
+            display: flex;
+            gap: 16px;
+        }
+
+        .stat-card {
+            flex: 1;
+            background: var(--bg-card);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            transition: var(--transition);
+            cursor: default;
+        }
+
+        .stat-card:hover {
+            border-color: var(--border-glow);
+            box-shadow: var(--shadow-glow);
+            transform: translateY(-2px);
+        }
+
+        .stat-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .stat-icon.cameras    { background: rgba(129, 140, 248, 0.12); color: var(--accent-indigo); }
+        .stat-icon.alerts     { background: rgba(251, 191, 36, 0.12);  color: var(--accent-amber); }
+        .stat-icon.plates     { background: rgba(34, 211, 238, 0.12);  color: var(--accent-cyan); }
+        .stat-icon.total      { background: rgba(167, 139, 250, 0.12); color: var(--accent-purple); }
+
+        .stat-info { display: flex; flex-direction: column; }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            line-height: 1.2;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .stat-label {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 500;
+        }
+
+        /* ─────────────── Map Panel ─────────────── */
+        .map-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-header {
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .panel-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+        }
+
+        .panel-badge {
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: rgba(129, 140, 248, 0.15);
+            color: var(--accent-indigo);
+            font-weight: 500;
+        }
+
+        #map {
+            flex: 1;
+            min-height: 300px;
+        }
+
+        /* Leaflet overrides for dark theme */
+        .leaflet-container { background: var(--bg-primary) !important; }
+        .leaflet-control-zoom a {
+            background: var(--bg-secondary) !important;
+            color: var(--text-primary) !important;
+            border-color: var(--border-subtle) !important;
+        }
+        .leaflet-control-zoom a:hover {
+            background: var(--bg-card) !important;
+        }
+
+        /* Custom map popup */
+        .leaflet-popup-content-wrapper {
+            background: var(--bg-secondary) !important;
+            border: 1px solid var(--border-subtle) !important;
+            border-radius: var(--radius-md) !important;
+            box-shadow: var(--shadow-card) !important;
+            color: var(--text-primary) !important;
+        }
+        .leaflet-popup-tip { background: var(--bg-secondary) !important; }
+        .leaflet-popup-close-button { color: var(--text-muted) !important; }
+
+        .popup-title {
+            font-weight: 600;
+            font-size: 0.9rem;
+            margin-bottom: 4px;
+        }
+        .popup-id {
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+        .popup-status {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .popup-status.streaming   { background: rgba(34,211,153,0.15); color: var(--accent-emerald); }
+        .popup-status.connected   { background: rgba(96,165,250,0.15); color: var(--accent-blue); }
+        .popup-status.reconnecting { background: rgba(251,191,36,0.15); color: var(--accent-amber); }
+        .popup-status.unknown     { background: rgba(100,116,139,0.15); color: var(--text-muted); }
+        .popup-status.offline     { background: rgba(251,113,133,0.15); color: var(--accent-rose); }
+
+        /* ─────────────── Alerts Panel ─────────────── */
+        .alerts-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            max-height: 100%;
+        }
+
+        .search-bar {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 8px 14px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-subtle);
+            background: rgba(255,255,255,0.03);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            outline: none;
+            transition: var(--transition);
+        }
+        .search-input::placeholder { color: var(--text-muted); }
+        .search-input:focus {
+            border-color: var(--accent-indigo);
+            box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.1);
+        }
+
+        .alerts-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+
+        /* Custom scrollbar */
+        .alerts-list::-webkit-scrollbar { width: 5px; }
+        .alerts-list::-webkit-scrollbar-track { background: transparent; }
+        .alerts-list::-webkit-scrollbar-thumb {
+            background: var(--border-subtle);
+            border-radius: 3px;
+        }
+        .alerts-list::-webkit-scrollbar-thumb:hover {
+            background: rgba(255,255,255,0.12);
+        }
+
+        .alert-card {
+            padding: 12px 14px;
+            border-radius: var(--radius-sm);
+            border: 1px solid transparent;
+            margin-bottom: 6px;
+            transition: var(--transition);
+            cursor: default;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .alert-card:hover {
+            background: rgba(255,255,255,0.03);
+            border-color: var(--border-subtle);
+        }
+
+        .alert-card.new-alert {
+            border-left: 3px solid var(--accent-cyan);
+            background: rgba(34, 211, 238, 0.04);
+        }
+
+        .alert-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+
+        .alert-plate {
+            font-family: var(--font-mono);
+            font-size: 1rem;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            color: var(--accent-cyan);
+        }
+
+        .alert-confidence {
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 6px;
+            font-weight: 600;
+        }
+
+        .conf-high   { background: rgba(34,211,153,0.12); color: var(--accent-emerald); }
+        .conf-medium { background: rgba(251,191,36,0.12);  color: var(--accent-amber); }
+        .conf-low    { background: rgba(251,113,133,0.12);  color: var(--accent-rose); }
+
+        .alert-camera {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .alert-time {
+            font-size: 0.68rem;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+        }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            color: var(--text-muted);
+            text-align: center;
+        }
+
+        .empty-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+            opacity: 0.4;
+        }
+
+        .empty-title {
+            font-weight: 600;
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+
+        .empty-desc {
+            font-size: 0.78rem;
+        }
+
+        /* ─────────────── Responsive ─────────────── */
+        @media (max-width: 1024px) {
+            .main {
+                grid-template-columns: 1fr;
+                max-height: none;
+                overflow: auto;
+            }
+            .map-panel { min-height: 400px; }
+        }
+
+        @media (max-width: 640px) {
+            .stats-bar { flex-direction: column; }
+            .header { padding: 12px 16px; }
+            .main { padding: 12px 16px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <!-- ─────── Header ─────── -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">S</div>
+                <div>
+                    <div class="brand">Sentinel</div>
+                    <div class="brand-sub">ANPR Command Center</div>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="connection-badge" id="ws-badge">
+                    <span class="pulse-dot"></span>
+                    <span id="ws-status-text">Connecting...</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- ─────── Main ─────── -->
+        <main class="main">
+            <!-- Stats Bar -->
+            <div class="stats-bar">
+                <div class="stat-card">
+                    <div class="stat-icon cameras">📷</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="stat-cameras">—</span>
+                        <span class="stat-label">Cameras Online</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon alerts">⚡</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="stat-alerts-today">—</span>
+                        <span class="stat-label">Alerts Today</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon plates">🔍</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="stat-plates">—</span>
+                        <span class="stat-label">Unique Plates</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon total">📊</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="stat-total">—</span>
+                        <span class="stat-label">Total Detections</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Map -->
+            <div class="map-panel">
+                <div class="panel-header">
+                    <span class="panel-title">📍 Live Camera Map</span>
+                    <span class="panel-badge" id="camera-count-badge">0 cameras</span>
+                </div>
+                <div id="map"></div>
+            </div>
+
+            <!-- Alerts Feed -->
+            <div class="alerts-panel">
+                <div class="panel-header">
+                    <span class="panel-title">🚨 Alert Feed</span>
+                    <span class="panel-badge" id="alert-live-badge">LIVE</span>
+                </div>
+                <div class="search-bar">
+                    <input
+                        type="text"
+                        class="search-input"
+                        id="plate-search"
+                        placeholder="Search plate number..."
+                    >
+                </div>
+                <div class="alerts-list" id="alerts-list">
+                    <div class="empty-state">
+                        <div class="empty-icon">📡</div>
+                        <div class="empty-title">Waiting for alerts…</div>
+                        <div class="empty-desc">Detections will appear here in real-time</div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Configuration
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    const API_BASE = '';  // same origin
+    const WS_URL = `ws://${location.host}/ws/alerts`;
+    const POLL_INTERVAL_MS = 10000;  // REST poll fallback: 10s
+    const MAX_ALERTS_DISPLAY = 200;
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // State
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    let map, cameraMarkers = {}, alertsList = [];
+    let ws = null, wsRetries = 0;
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Map initialization
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    function initMap() {
+        map = L.map('map', {
+            zoomControl: true,
+            attributionControl: false,
+        }).setView([23.025, 72.55], 13);  // Ahmedabad default center
+
+        // Dark tile layer
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19,
+        }).addTo(map);
+    }
+
+    function createCameraIcon(status) {
+        const colors = {
+            streaming: '#34d399',
+            connected: '#60a5fa',
+            reconnecting: '#fbbf24',
+            unknown: '#64748b',
+            offline: '#fb7185',
+        };
+        const color = colors[status] || colors.unknown;
+
+        return L.divIcon({
+            className: 'camera-marker',
+            html: `
+                <div style="
+                    width: 28px; height: 28px;
+                    background: ${color};
+                    border: 3px solid rgba(0,0,0,0.5);
+                    border-radius: 50%;
+                    box-shadow: 0 0 12px ${color}80, 0 0 24px ${color}40;
+                    display: flex; align-items: center; justify-content: center;
+                    font-size: 12px;
+                    transition: all 0.3s ease;
+                ">📷</div>
+            `,
+            iconSize: [28, 28],
+            iconAnchor: [14, 14],
+        });
+    }
+
+    function updateCameraMarkers(cameras) {
+        cameras.forEach(cam => {
+            if (!cam.latitude || !cam.longitude) return;
+
+            const popupHtml = `
+                <div class="popup-title">${cam.camera_name || 'Unnamed Camera'}</div>
+                <div class="popup-id">${cam.camera_id}</div>
+                <span class="popup-status ${cam.status || 'unknown'}">${cam.status || 'unknown'}</span>
+            `;
+
+            if (cameraMarkers[cam.camera_id]) {
+                const marker = cameraMarkers[cam.camera_id];
+                marker.setIcon(createCameraIcon(cam.status));
+                marker.setPopupContent(popupHtml);
+            } else {
+                const marker = L.marker(
+                    [cam.latitude, cam.longitude],
+                    { icon: createCameraIcon(cam.status) }
+                ).addTo(map).bindPopup(popupHtml);
+                cameraMarkers[cam.camera_id] = marker;
+            }
+        });
+
+        document.getElementById('camera-count-badge').textContent =
+            `${cameras.length} camera${cameras.length !== 1 ? 's' : ''}`;
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Alerts rendering
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    function formatTime(isoStr) {
+        if (!isoStr) return '—';
+        const d = new Date(isoStr);
+        return d.toLocaleTimeString('en-IN', {
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+        }) + ' · ' + d.toLocaleDateString('en-IN', {
+            day: '2-digit', month: 'short',
+        });
+    }
+
+    function confidenceClass(conf) {
+        if (conf >= 0.7) return 'conf-high';
+        if (conf >= 0.4) return 'conf-medium';
+        return 'conf-low';
+    }
+
+    function renderAlertCard(alert, isNew = false) {
+        const conf = alert.confidence != null ? (alert.confidence * 100).toFixed(0) + '%' : '—';
+        return `
+            <div class="alert-card ${isNew ? 'new-alert' : ''}">
+                <div class="alert-top">
+                    <span class="alert-plate">${alert.plate_number || '???'}</span>
+                    <span class="alert-confidence ${confidenceClass(alert.confidence || 0)}">${conf}</span>
+                </div>
+                <div class="alert-camera">${alert.camera_name || alert.camera_id || '—'}</div>
+                <div class="alert-time">${formatTime(alert.detected_at)}</div>
+            </div>
+        `;
+    }
+
+    function renderAlerts(alerts, prepend = false) {
+        const container = document.getElementById('alerts-list');
+        const searchValue = document.getElementById('plate-search').value.toUpperCase();
+
+        if (prepend && alerts.length > 0) {
+            // Prepend new alerts
+            alerts.forEach(a => alertsList.unshift(a));
+            // Cap length
+            if (alertsList.length > MAX_ALERTS_DISPLAY) {
+                alertsList = alertsList.slice(0, MAX_ALERTS_DISPLAY);
+            }
+        } else if (!prepend) {
+            alertsList = alerts;
+        }
+
+        const filtered = searchValue
+            ? alertsList.filter(a => (a.plate_number || '').toUpperCase().includes(searchValue))
+            : alertsList;
+
+        if (filtered.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">${searchValue ? '🔎' : '📡'}</div>
+                    <div class="empty-title">${searchValue ? 'No matches' : 'Waiting for alerts…'}</div>
+                    <div class="empty-desc">${searchValue ? 'Try a different plate number' : 'Detections will appear here in real-time'}</div>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = filtered.map((a, i) => renderAlertCard(a, prepend && i < alerts.length)).join('');
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Data fetching
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    async function fetchStats() {
+        try {
+            const res = await fetch(`${API_BASE}/api/stats`);
+            const data = await res.json();
+
+            document.getElementById('stat-cameras').textContent = data.total_cameras || 0;
+            document.getElementById('stat-alerts-today').textContent = data.alerts_today || 0;
+            document.getElementById('stat-plates').textContent = data.unique_plates_today || 0;
+            document.getElementById('stat-total').textContent = data.total_alerts || 0;
+        } catch (e) {
+            console.warn('Stats fetch failed:', e);
+        }
+    }
+
+    async function fetchCameras() {
+        try {
+            const res = await fetch(`${API_BASE}/api/cameras`);
+            const data = await res.json();
+            updateCameraMarkers(data.cameras || []);
+        } catch (e) {
+            console.warn('Camera fetch failed:', e);
+        }
+    }
+
+    async function fetchAlerts() {
+        try {
+            const res = await fetch(`${API_BASE}/api/alerts?limit=50`);
+            const data = await res.json();
+            renderAlerts(data.alerts || []);
+        } catch (e) {
+            console.warn('Alerts fetch failed:', e);
+        }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // WebSocket — real-time alert stream
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    function connectWebSocket() {
+        const badge = document.getElementById('ws-badge');
+        const statusText = document.getElementById('ws-status-text');
+
+        try {
+            ws = new WebSocket(WS_URL);
+        } catch (e) {
+            badge.classList.add('disconnected');
+            statusText.textContent = 'WS Unavailable';
+            return;
+        }
+
+        ws.onopen = () => {
+            wsRetries = 0;
+            badge.classList.remove('disconnected');
+            statusText.textContent = 'Live';
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'new_alerts' && data.alerts) {
+                    renderAlerts(data.alerts, true);
+                    fetchStats();  // refresh stats on new alerts
+                }
+            } catch (e) {
+                console.warn('WS message parse error:', e);
+            }
+        };
+
+        ws.onclose = () => {
+            badge.classList.add('disconnected');
+            statusText.textContent = 'Reconnecting...';
+            wsRetries++;
+            const delay = Math.min(1000 * Math.pow(2, wsRetries), 30000);
+            setTimeout(connectWebSocket, delay);
+        };
+
+        ws.onerror = () => {
+            badge.classList.add('disconnected');
+            statusText.textContent = 'Error';
+        };
+
+        // Keep-alive ping every 30s
+        setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send('ping');
+            }
+        }, 30000);
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Search handler
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    document.getElementById('plate-search').addEventListener('input', () => {
+        renderAlerts([], false);  // re-render with filter
+    });
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Init
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    document.addEventListener('DOMContentLoaded', () => {
+        initMap();
+        fetchStats();
+        fetchCameras();
+        fetchAlerts();
+        connectWebSocket();
+
+        // Periodic refresh (fallback for non-WS updates like camera status)
+        setInterval(() => {
+            fetchStats();
+            fetchCameras();
+        }, POLL_INTERVAL_MS);
+    });
+    </script>
+</body>
+</html>

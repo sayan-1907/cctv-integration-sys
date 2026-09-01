@@ -1,0 +1,68 @@
+# Demo configuration — uses synthetic mock:// streams instead of real
+# RTSP feeds, so the full Layer 1 pipeline (throttling, bounded queues,
+# reconnect/backoff, watchdog force-restart) can be proven out and
+# demoed for the judges without needing physical cameras.
+#
+# Run: python src/orchestrator.py config/demo_cameras.yaml
+
+department_id: "DEMO-DEPT-01"
+department_name: "Hackathon Demo Department"
+
+max_concurrent_streams: 5
+target_decode_fps: 5
+queue_max_size: 5
+
+reconnect:
+  initial_delay: 2
+  max_delay: 20
+  multiplier: 2
+  jitter: 0.3
+
+stall_timeout_seconds: 10
+
+# Layer 2 — AI & Metadata Extraction
+layer2:
+  # N worker processes SHARE all camera queues (round-robin, non-blocking).
+  # Each worker loads its own YOLO+EasyOCR models once — this count is a
+  # memory/throughput knob, not a per-camera setting. Start at 1-2 on
+  # modest hardware; raise only after confirming CPU/RAM headroom.
+  ai_worker_count: 2
+  device: "cpu"                        # "cuda" if a GPU is available, "auto" to detect
+  yolo_model: "yolov8n.pt"             # official Ultralytics nano weights, auto-downloaded
+  vehicle_confidence_threshold: 0.35
+  ocr_confidence_threshold: 0.4
+  snapshot_dir: "../snapshots"
+  snapshot_max_width: 240              # enforces "low-res" snapshot constraint
+  plate_dedup_window_seconds: 10       # suppress repeat events for a stationary vehicle
+  poll_interval_seconds: 0.05          # idle sleep when all camera queues are empty
+
+# Layer 3 — Central Message Routing (Kafka)
+# See cameras.yaml for detailed comments on each setting.
+layer3:
+  kafka_broker: "sqlite"
+  kafka_topic: "traffic-anpr-alerts"
+  kafka_spill_dir: "../kafka_spill"
+  kafka_queue_size: 500
+  kafka_retry_backoff_s: 5.0
+
+cameras:
+  - id: "DEMO-CAM-01"
+    name: "Mock Junction A"
+    rtsp_url: 0
+    latitude: 23.0225
+    longitude: 72.5714
+    enabled: true
+
+  - id: "DEMO-CAM-02"
+    name: "Mock Junction B"
+    rtsp_url: "mock://320x240?fail_after=40"
+    latitude: 23.0325
+    longitude: 72.5619
+    enabled: true
+
+  - id: "DEMO-CAM-03"
+    name: "Mock Junction C (stable)"
+    rtsp_url: "mock://320x240?fail_after=600"
+    latitude: 23.0295
+    longitude: 72.5066
+    enabled: true

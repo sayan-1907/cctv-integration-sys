@@ -1,0 +1,88 @@
+# Layer 1 — Edge Adapter Configuration
+# One of these files lives on each departmental server.
+# It never leaves the server; only the `department_id` and camera
+# `id`/`location` fields are ever synced to the central PostGIS registry.
+
+department_id: "GJ-AHM-TRAFFIC-01"
+department_name: "Ahmedabad Traffic Police"
+
+# Hard ceiling on concurrent streams this host will attempt to run.
+# Set conservatively for legacy hardware. The orchestrator refuses to
+# exceed this even if more cameras are listed below.
+max_concurrent_streams: 4
+
+# Target decode framerate. Layer 2 needs 3-5 fps on motion; we decode
+# at this rate at the SOURCE so we never waste CPU decoding frames
+# we're just going to throw away.
+target_decode_fps: 5
+
+# Bounded queue size per camera (frames). At 5fps this is a ~1 second
+# buffer. Deliberately small — freshness over completeness.
+queue_max_size: 5
+
+# Reconnect backoff (seconds)
+reconnect:
+  initial_delay: 2
+  max_delay: 60
+  multiplier: 2
+  jitter: 0.3
+
+# Watchdog: if no new frame arrives within this window, the stream is
+# considered stalled (not just disconnected — could be a frozen feed)
+# and is force-restarted.
+stall_timeout_seconds: 15
+
+# Layer 2 — AI & Metadata Extraction
+layer2:
+  # N worker processes SHARE all camera queues on this host (round-robin,
+  # non-blocking). Each worker loads its own YOLO+EasyOCR models once —
+  # this is a throughput/memory knob, NOT a per-camera setting. Start at
+  # 1-2 on legacy hardware; raise only after confirming CPU/RAM headroom
+  # with 3 cameras already ceiling'd above.
+  ai_worker_count: 2
+  device: "cpu"                        # "cuda" if this host has a GPU, "auto" to detect
+  yolo_model: "yolov8n.pt"             # official Ultralytics nano weights, auto-downloaded once
+  vehicle_confidence_threshold: 0.35
+  ocr_confidence_threshold: 0.4
+  snapshot_dir: "../snapshots"
+  snapshot_max_width: 240              # enforces the "low-res snapshot" constraint
+  plate_dedup_window_seconds: 10       # suppress repeat events for a vehicle stopped at a signal
+  poll_interval_seconds: 0.05          # idle sleep when all camera queues are empty
+
+# Layer 3 — Central Message Routing (Kafka)
+# Payloads from Layer 2 are published asynchronously to this broker.
+# If the broker is unreachable, payloads are spilled to a local SQLite
+# database and retried automatically — Layer 1 and 2 never crash.
+# Remove or comment out this entire block to disable Kafka and fall
+# back to stdout-only output (useful for offline development).
+layer3:
+  kafka_broker: "localhost:9092"
+  kafka_topic: "traffic-anpr-alerts"
+  kafka_spill_dir: "../kafka_spill"    # per-worker SQLite spill files for fault tolerance
+  kafka_queue_size: 500                # in-memory buffer before spilling to disk
+  kafka_retry_backoff_s: 5.0           # seconds to wait before retrying a failed Kafka send
+
+cameras:
+  - id: "GJ-AHM-TRF-0001"
+    name: "Ashram Road - Income Tax Circle"
+    rtsp_url: "rtsp://192.168.1.101:554/stream1"
+    onvif_endpoint: "http://192.168.1.101:8080/onvif/device_service"
+    latitude: 23.0225
+    longitude: 72.5714
+    enabled: true
+
+  - id: "GJ-AHM-TRF-0002"
+    name: "CG Road - Panchvati Circle"
+    rtsp_url: "rtsp://192.168.1.102:554/stream1"
+    onvif_endpoint: "http://192.168.1.102:8080/onvif/device_service"
+    latitude: 23.0325
+    longitude: 72.5619
+    enabled: true
+
+  - id: "GJ-AHM-TRF-0003"
+    name: "SG Highway - Iskcon Crossroads"
+    rtsp_url: "rtsp://192.168.1.103:554/stream1"
+    onvif_endpoint: "http://192.168.1.103:8080/onvif/device_service"
+    latitude: 23.0295
+    longitude: 72.5066
+    enabled: true

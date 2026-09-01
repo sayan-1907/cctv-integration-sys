@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# AI Models
+*.pt
+yolov8n.pt
+
+# Databases / Spill files
+*.db
+*.db-shm
+*.db-wal
+kafka_spill/
+
+# Snapshots / Local Data
+snapshots/
+layer2/

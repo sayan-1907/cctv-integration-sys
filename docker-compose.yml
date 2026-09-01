@@ -1,0 +1,136 @@
+# docker-compose.yml — Layer 3: Central Message Routing
+#
+# Spins up a single-node Kafka broker (Confluent 7.x) with Zookeeper
+# for local development and hackathon demos. Kafka automatically
+# creates the `traffic-anpr-alerts` topic on first use, but we also
+# pre-create it via an init container so the partition count and
+# retention are explicit, not left to broker defaults.
+#
+# Usage:
+#   docker-compose up -d          # start in background
+#   docker-compose logs -f kafka  # follow broker logs
+#   docker-compose down -v        # stop and wipe volumes (clean slate)
+
+version: "3.9"
+
+services:
+  # ─────────────────────────────────────────────────────────────────
+  # Zookeeper — coordination layer for Kafka (required in non-KRaft mode)
+  # ─────────────────────────────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: sentinel-zookeeper
+    restart: unless-stopped
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zk-data:/var/lib/zookeeper/data
+      - zk-logs:/var/lib/zookeeper/log
+
+  # ─────────────────────────────────────────────────────────────────
+  # Kafka — single-node broker for edge-to-cloud message routing
+  # ─────────────────────────────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: sentinel-kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"      # host-accessible listener (edge publishers connect here)
+      - "29092:29092"     # inter-container listener (for future consumers in Docker)
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+
+      # Two listeners: one for host-side Python scripts, one for
+      # Docker-networked consumers (Layer 4 dashboard containers).
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      # Single-node defaults — safe for development, NOT for production.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+
+      # Allow auto-creation as a fallback, but we pre-create below.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+      # Retain ANPR alerts for 7 days (enough for a hackathon demo +
+      # judges reviewing historical data). In production this would
+      # be set per-topic by ops.
+      KAFKA_LOG_RETENTION_HOURS: 168
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+
+  # ─────────────────────────────────────────────────────────────────
+  # Init container — pre-creates the ANPR topic with explicit settings
+  # so we don't rely on auto-creation defaults (which would give us
+  # only 1 partition and the broker's default retention).
+  # ─────────────────────────────────────────────────────────────────
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: sentinel-kafka-init
+    depends_on:
+      - kafka
+    entrypoint: /bin/bash
+    command: |
+      -c "
+      echo 'Waiting for Kafka to be ready...'
+      cub kafka-ready -b kafka:29092 1 60
+
+      echo 'Creating topic: traffic-anpr-alerts'
+      kafka-topics --create \
+        --if-not-exists \
+        --bootstrap-server kafka:29092 \
+        --topic traffic-anpr-alerts \
+        --partitions 3 \
+        --replication-factor 1 \
+        --config retention.ms=604800000
+
+      echo 'Creating topic: camera-heartbeats'
+      kafka-topics --create \
+        --if-not-exists \
+        --bootstrap-server kafka:29092 \
+        --topic camera-heartbeats \
+        --partitions 1 \
+        --replication-factor 1 \
+        --config retention.ms=86400000
+
+      echo 'Topic creation complete. Listing topics:'
+      kafka-topics --list --bootstrap-server kafka:29092
+      "
+
+  # ─────────────────────────────────────────────────────────────────
+  # PostGIS — spatial database for camera registry + ANPR alerts
+  # Stores camera metadata (with lat/long as PostGIS geometry) and
+  # ANPR alert payloads consumed from Kafka by the Layer 4 consumer.
+  # ─────────────────────────────────────────────────────────────────
+  postgis:
+    image: postgis/postgis:16-3.4
+    container_name: sentinel-postgis
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: sentinel
+      POSTGRES_USER: sentinel
+      POSTGRES_PASSWORD: sentinel_dev
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinel -d sentinel"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  zk-data:
+  zk-logs:
+  kafka-data:
+  pg-data:
