@@ -29,6 +29,7 @@ layer2:
   ai_worker_count: 2
   device: "cpu"                        # "cuda" if a GPU is available, "auto" to detect
   yolo_model: "yolov8n.pt"             # official Ultralytics nano weights, auto-downloaded
+  ocr_engine: "fast_alpr"
   vehicle_confidence_threshold: 0.35
   ocr_confidence_threshold: 0.4
   snapshot_dir: "../snapshots"

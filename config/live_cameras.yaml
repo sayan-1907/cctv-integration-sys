@@ -26,6 +26,7 @@ layer2:
   ai_worker_count: 2
   device: "cpu"
   yolo_model: "yolov8n.pt"
+  ocr_engine: "fast_alpr"
   vehicle_confidence_threshold: 0.35
   ocr_confidence_threshold: 0.4
   snapshot_dir: "../snapshots"

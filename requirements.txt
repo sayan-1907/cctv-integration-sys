@@ -12,3 +12,4 @@ confluent-kafka==2.6.1
 # Layer 4 — Dashboard API & SQLite Consumer
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
+fast-alpr[onnx]

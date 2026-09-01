@@ -121,9 +121,10 @@ class ModelBundle:
     cheaply picklable, and we don't want to try — one load per worker
     is exactly the design intent).
     """
-    def __init__(self, yolo, ocr_reader):
+    def __init__(self, yolo, ocr_reader, fast_alpr=None):
         self.yolo = yolo
         self.ocr_reader = ocr_reader
+        self.fast_alpr = fast_alpr
 
 
 def load_models(config: dict) -> ModelBundle:
@@ -136,7 +137,6 @@ def load_models(config: dict) -> ModelBundle:
     imported inside the child process that actually calls this.
     """
     from ultralytics import YOLO
-    import easyocr
     import torch
 
     device = config.get("device", "cpu")
@@ -146,10 +146,24 @@ def load_models(config: dict) -> ModelBundle:
     logger.info("Loading YOLO model (%s) on device=%s", config.get("yolo_model", "yolov8n.pt"), device)
     yolo = YOLO(config.get("yolo_model", "yolov8n.pt"))
 
-    logger.info("Loading EasyOCR reader (gpu=%s)", device == "cuda")
-    ocr_reader = easyocr.Reader(["en"], gpu=(device == "cuda"), verbose=False)
+    ocr_engine = config.get("ocr_engine", "easyocr")
+    ocr_reader = None
+    fast_alpr = None
 
-    return ModelBundle(yolo=yolo, ocr_reader=ocr_reader)
+    if ocr_engine == "easyocr":
+        import easyocr
+        logger.info("Loading EasyOCR reader (gpu=%s)", device == "cuda")
+        ocr_reader = easyocr.Reader(["en"], gpu=(device == "cuda"), verbose=False)
+    elif ocr_engine == "fast_alpr":
+        from fast_alpr import ALPR
+        logger.info("Loading fast-alpr")
+        fast_alpr = ALPR(detector_model="yolo-v9-t-384-license-plate-end2end", ocr_model="cct-xs-v2-global-model")
+    else:
+        logger.warning(f"Unknown ocr_engine: {ocr_engine}. Defaulting to easyocr")
+        import easyocr
+        ocr_reader = easyocr.Reader(["en"], gpu=(device == "cuda"), verbose=False)
+
+    return ModelBundle(yolo=yolo, ocr_reader=ocr_reader, fast_alpr=fast_alpr)
 
 
 def normalize_plate_text(raw: str) -> Optional[str]:
@@ -168,34 +182,59 @@ def normalize_plate_text(raw: str) -> Optional[str]:
 
 
 def extract_plate_from_vehicle_crop(
-    crop: np.ndarray, ocr_reader, min_conf: float
+    crop: np.ndarray, bundle: ModelBundle, min_conf: float
 ) -> Optional[Tuple[str, float]]:
     """
-    Runs EasyOCR's text detector+recognizer over a vehicle crop and
+    Runs text detector+recognizer over a vehicle crop and
     returns the highest-confidence plate-shaped text found, or None.
-    We deliberately do NOT try to guess a plate sub-region ourselves —
-    EasyOCR's own detector already localizes text regions, and a
-    vehicle crop is small enough that running it directly is cheap.
     """
     if crop is None or crop.size == 0:
         return None
 
-    try:
-        results = ocr_reader.readtext(crop)
-    except Exception as exc:
-        logger.debug("OCR failed on crop: %s", exc)
-        return None
+    if bundle.fast_alpr:
+        try:
+            results = bundle.fast_alpr.predict(crop)
+        except Exception as exc:
+            logger.debug("fast-alpr failed on crop: %s", exc)
+            return None
+            
+        best: Optional[Tuple[str, float]] = None
+        for res in results:
+            if res.ocr is None or not res.ocr.text:
+                continue
+            prob = res.ocr.confidence
+            if isinstance(prob, list):
+                import statistics
+                prob = statistics.mean(prob)
+            prob = float(prob)
+            if prob < min_conf:
+                continue
+            normalized = normalize_plate_text(res.ocr.text)
+            if normalized is None:
+                continue
+            if best is None or prob > best[1]:
+                best = (normalized, prob)
+        return best
 
-    best: Optional[Tuple[str, float]] = None
-    for _bbox, text, prob in results:
-        if prob < min_conf:
-            continue
-        normalized = normalize_plate_text(text)
-        if normalized is None:
-            continue
-        if best is None or prob > best[1]:
-            best = (normalized, float(prob))
-    return best
+    elif bundle.ocr_reader:
+        try:
+            results = bundle.ocr_reader.readtext(crop)
+        except Exception as exc:
+            logger.debug("OCR failed on crop: %s", exc)
+            return None
+
+        best: Optional[Tuple[str, float]] = None
+        for _bbox, text, prob in results:
+            if prob < min_conf:
+                continue
+            normalized = normalize_plate_text(text)
+            if normalized is None:
+                continue
+            if best is None or prob > best[1]:
+                best = (normalized, float(prob))
+        return best
+
+    return None
 
 
 def process_frame(envelope, bundle: ModelBundle, config: dict) -> List[PlateDetection]:
@@ -223,7 +262,7 @@ def process_frame(envelope, bundle: ModelBundle, config: dict) -> List[PlateDete
 
         crop = frame[y1:y2, x1:x2]
         plate_result = extract_plate_from_vehicle_crop(
-            crop, bundle.ocr_reader, config.get("ocr_confidence_threshold", 0.4)
+            crop, bundle, config.get("ocr_confidence_threshold", 0.4)
         )
         if plate_result is None:
             continue
