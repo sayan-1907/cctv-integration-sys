@@ -130,6 +130,7 @@ def get_cameras():
                 last_seen,
                 registered_at
             FROM camera_registry
+            WHERE camera_id NOT LIKE 'DEMO-%'
             ORDER BY camera_id
         """)
         cameras = _rows_to_dicts(cur.fetchall())
@@ -163,7 +164,7 @@ def get_alerts(
             c.longitude
         FROM anpr_alerts a
         LEFT JOIN camera_registry c ON a.camera_id = c.camera_id
-        WHERE 1=1
+        WHERE a.camera_id NOT LIKE 'DEMO-%'
     """
     params = []
 
@@ -198,13 +199,14 @@ def get_stats():
     conn = get_db()
     try:
         # Total cameras
-        cur = conn.execute("SELECT COUNT(*) as total FROM camera_registry")
+        cur = conn.execute("SELECT COUNT(*) as total FROM camera_registry WHERE camera_id NOT LIKE 'DEMO-%'")
         total_cameras = cur.fetchone()["total"]
 
         # Camera status breakdown
         cur = conn.execute("""
             SELECT status, COUNT(*) as count
             FROM camera_registry
+            WHERE camera_id NOT LIKE 'DEMO-%'
             GROUP BY status
         """)
         status_counts = {row["status"]: row["count"] for row in cur.fetchall()}

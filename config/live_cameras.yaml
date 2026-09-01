@@ -1,0 +1,259 @@
+# Live Camera Configuration — Sentinel CCTV Grid
+# Streams from https://cctv.corp8.cloud (corp8 public RTSP gateway)
+# RTSP endpoint: rtsp://103.250.160.189:8554/stream/<id>
+# HLS fallback:  https://cctv.corp8.cloud/<id>/index.m3u8
+
+department_id: "SENTINEL-LIVE-01"
+department_name: "Sentinel Camera Grid — Live Testing"
+
+# IMPORTANT: Start with 4. Each stream = 1 OS process + OpenCV decode.
+# Raise only after confirming CPU/RAM headroom with htop/Task Manager.
+max_concurrent_streams: 10
+
+target_decode_fps: 5
+queue_max_size: 5
+
+reconnect:
+  initial_delay: 2
+  max_delay: 30       # Sentinel guide recommends cap ~30s
+  multiplier: 2
+  jitter: 0.3
+
+stall_timeout_seconds: 15
+
+# Layer 2 — AI & Metadata Extraction
+layer2:
+  ai_worker_count: 2
+  device: "cpu"
+  yolo_model: "yolov8n.pt"
+  vehicle_confidence_threshold: 0.35
+  ocr_confidence_threshold: 0.4
+  snapshot_dir: "../snapshots"
+  snapshot_max_width: 240
+  plate_dedup_window_seconds: 10
+  poll_interval_seconds: 0.05
+
+# Layer 3 — Kafka (sqlite mode for local testing)
+layer3:
+  kafka_broker: "sqlite"
+  kafka_topic: "traffic-anpr-alerts"
+  kafka_spill_dir: "../kafka_spill"
+  kafka_queue_size: 500
+  kafka_retry_backoff_s: 5.0
+
+cameras:
+  # ── Row 1 ──────────────────────────────────────────────
+  - id: "cam01"
+    name: "Chiman bhai Bridge"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam01"
+    latitude: 23.0225
+    longitude: 72.5714
+    enabled: true
+
+  - id: "cam02"
+    name: "Janpath"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam02"
+    latitude: 23.0300
+    longitude: 72.5800
+    enabled: true
+
+  - id: "cam03"
+    name: "G.N.G.C Office"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam03"
+    latitude: 23.0350
+    longitude: 72.5650
+    enabled: true
+
+  - id: "cam04"
+    name: "Paldi Circle"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam04"
+    latitude: 23.0150
+    longitude: 72.5600
+    enabled: true
+
+  - id: "cam05"
+    name: "Visat teen Rasta"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam05"
+    latitude: 23.0700
+    longitude: 72.5350
+    enabled: true
+
+  # ── Row 2 ──────────────────────────────────────────────
+  - id: "cam06"
+    name: "Limbavadi gate Junagadh"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam06"
+    latitude: 21.5222
+    longitude: 70.4579
+    enabled: true
+
+  - id: "cam07"
+    name: "hero-showroom-gir-somnath"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam07"
+    latitude: 20.8880
+    longitude: 70.4016
+    enabled: true
+
+  - id: "cam08"
+    name: "majiwadi-gate-junagadh"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam08"
+    latitude: 21.5185
+    longitude: 70.4635
+    enabled: true
+
+  - id: "cam09"
+    name: "new-bypass-near-by-circle-junagadh-2"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam09"
+    latitude: 21.5300
+    longitude: 70.4500
+    enabled: true
+
+  - id: "cam10"
+    name: "char-chowk-road-2-junagadh"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam10"
+    latitude: 21.5250
+    longitude: 70.4550
+    enabled: true
+
+  # ── Row 3 ──────────────────────────────────────────────
+  - id: "cam11"
+    name: "oolatpara junagadh"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam11"
+    latitude: 21.5200
+    longitude: 70.4600
+    enabled: true
+
+  - id: "cam12"
+    name: "Tri Mandir Adalaj Teltinala"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam12"
+    latitude: 23.1647
+    longitude: 72.5769
+    enabled: true
+
+  - id: "cam13"
+    name: "CN Vidhyalaya"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam13"
+    latitude: 23.0400
+    longitude: 72.5500
+    enabled: true
+
+  - id: "cam14"
+    name: "Delight RLVD"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam14"
+    latitude: 23.0450
+    longitude: 72.5550
+    enabled: true
+
+  - id: "cam15"
+    name: "Suvisha park"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam15"
+    latitude: 23.0500
+    longitude: 72.5400
+    enabled: true
+
+  # ── Row 4 ──────────────────────────────────────────────
+  - id: "cam16"
+    name: "Visat P7"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam16"
+    latitude: 23.0720
+    longitude: 72.5330
+    enabled: true
+
+  - id: "cam17"
+    name: "Rajkot Bus Port CCTV"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam17"
+    latitude: 22.3039
+    longitude: 70.8022
+    enabled: true
+
+  - id: "cam18"
+    name: "Rajkot CCTV"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam18"
+    latitude: 22.3000
+    longitude: 70.8000
+    enabled: true
+
+  - id: "cam19"
+    name: "Khaparia Gram Panchayat, Taluka Gandevi, District Navsari"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam19"
+    latitude: 20.8120
+    longitude: 73.0010
+    enabled: true
+
+  - id: "cam20"
+    name: "Mohanpura"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam20"
+    latitude: 23.0600
+    longitude: 72.5200
+    enabled: true
+
+  # ── Row 5 ──────────────────────────────────────────────
+  - id: "cam21"
+    name: "CAM21"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam21"
+    latitude: 23.0000
+    longitude: 72.5000
+    enabled: true
+
+  - id: "cam22"
+    name: "CAM22"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam22"
+    latitude: 23.0050
+    longitude: 72.5050
+    enabled: true
+
+  - id: "cam23"
+    name: "CAM23"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam23"
+    latitude: 23.0100
+    longitude: 72.5100
+    enabled: true
+
+  - id: "cam24"
+    name: "CAM24"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam24"
+    latitude: 23.0150
+    longitude: 72.5150
+    enabled: true
+
+  - id: "cam25"
+    name: "CAM25"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam25"
+    latitude: 23.0200
+    longitude: 72.5200
+    enabled: true
+
+  # ── Row 6 ──────────────────────────────────────────────
+  - id: "cam26"
+    name: "CAM26"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam26"
+    latitude: 23.0250
+    longitude: 72.5250
+    enabled: true
+
+  - id: "cam27"
+    name: "CAM27"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam27"
+    latitude: 23.0300
+    longitude: 72.5300
+    enabled: true
+
+  - id: "cam28"
+    name: "CAM28"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam28"
+    latitude: 23.0350
+    longitude: 72.5350
+    enabled: true
+
+  - id: "cam29"
+    name: "CAM29"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam29"
+    latitude: 23.0400
+    longitude: 72.5400
+    enabled: true
+
+  - id: "cam30"
+    name: "CAM30"
+    rtsp_url: "rtsp://103.250.160.189:8554/stream/cam30"
+    latitude: 23.0450
+    longitude: 72.5450
+    enabled: true
