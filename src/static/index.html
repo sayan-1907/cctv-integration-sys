@@ -681,6 +681,70 @@
             border-color: rgba(129, 140, 248, 0.5);
             transform: translateY(-1px);
         }
+
+        /* ─────────────── Detail Modal ─────────────── */
+        .detail-body {
+            padding: 24px;
+        }
+
+        .detail-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+
+        .detail-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 500;
+        }
+
+        .detail-value {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .detail-plate-lg {
+            font-family: var(--font-mono);
+            font-size: 1.8rem;
+            font-weight: 800;
+            letter-spacing: 2px;
+            color: var(--accent-cyan);
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 16px;
+            background: rgba(34, 211, 238, 0.05);
+            border: 1px solid rgba(34, 211, 238, 0.2);
+            border-radius: var(--radius-md);
+            text-shadow: 0 0 20px rgba(34, 211, 238, 0.4);
+        }
+
+        .vehicle-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .alert-card-clickable {
+            cursor: pointer;
+        }
+        .alert-card-clickable:hover {
+            box-shadow: 0 0 15px rgba(34, 211, 238, 0.1);
+        }
     </style>
 </head>
 <body>
@@ -795,6 +859,44 @@
                 <div class="stream-footer">
                     <span>MJPEG Stream · ~<span class="stream-fps">10</span> FPS</span>
                     <span>Press <kbd style="padding: 1px 5px; border: 1px solid var(--border-subtle); border-radius: 4px; font-family: var(--font-mono);">Esc</kbd> to close</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ─────── Detail View Modal ─────── -->
+        <div class="stream-overlay" id="detail-overlay" onclick="closeDetailModal(event)">
+            <div class="stream-modal" style="max-width: 500px;" onclick="event.stopPropagation()">
+                <div class="stream-modal-header">
+                    <div class="stream-modal-title">
+                        <h3>Detection Details</h3>
+                    </div>
+                    <button class="stream-close-btn" onclick="closeDetailModal()" title="Close">✕</button>
+                </div>
+                <div class="detail-body">
+                    <div class="detail-plate-lg" id="detail-plate">GJ01XX0000</div>
+                    
+                    <div class="detail-row">
+                        <span class="detail-label">Confidence</span>
+                        <span class="detail-value alert-confidence" id="detail-conf">98%</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Time</span>
+                        <span class="detail-value" id="detail-time" style="font-family: var(--font-mono); font-size: 0.85rem;">—</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Location</span>
+                        <div style="text-align: right;">
+                            <div class="detail-value" id="detail-area">—</div>
+                            <div style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted);" id="detail-cam">—</div>
+                        </div>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Vehicle Data</span>
+                        <div style="display: flex; gap: 8px;">
+                            <span class="vehicle-badge" id="detail-vtype">🚘 Unknown</span>
+                            <span class="vehicle-badge" id="detail-vcolor">⚪ Unknown</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -916,14 +1018,15 @@
 
     function renderAlertCard(alert, isNew = false) {
         const conf = alert.confidence != null ? (alert.confidence * 100).toFixed(0) + '%' : '—';
+        const alertJson = encodeURIComponent(JSON.stringify(alert));
         return `
-            <div class="alert-card ${isNew ? 'new-alert' : ''}">
+            <div class="alert-card alert-card-clickable ${isNew ? 'new-alert' : ''}" onclick="openDetailModal('${alertJson}')">
                 <div class="alert-top">
                     <span class="alert-plate">${alert.plate_number || '???'}</span>
                     <span class="alert-confidence ${confidenceClass(alert.confidence || 0)}">${conf}</span>
                 </div>
-                <div class="alert-camera">${alert.camera_name || alert.camera_id || '—'}</div>
-                <div class="alert-time">${formatTime(alert.detected_at)}</div>
+                <div class="alert-camera">${alert.area_name || alert.camera_name || alert.camera_id || '—'}</div>
+                <div class="alert-time">${formatTime(alert.detected_at || alert.timestamp)}</div>
             </div>
         `;
     }
@@ -943,6 +1046,7 @@
             alertsList = alerts;
         }
 
+        // For live updates we just do client-side filtering if search is active
         const filtered = searchValue
             ? alertsList.filter(a => (a.plate_number || '').toUpperCase().includes(searchValue))
             : alertsList;
@@ -951,7 +1055,7 @@
             container.innerHTML = `
                 <div class="empty-state">
                     <div class="empty-icon">${searchValue ? '🔎' : '📡'}</div>
-                    <div class="empty-title">${searchValue ? 'No matches' : 'Waiting for alerts…'}</div>
+                    <div class="empty-title">${searchValue ? 'No detections found for "' + searchValue + '"' : 'Waiting for alerts…'}</div>
                     <div class="empty-desc">${searchValue ? 'Try a different plate number' : 'Detections will appear here in real-time'}</div>
                 </div>
             `;
@@ -1058,8 +1162,40 @@
     // Search handler
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    document.getElementById('plate-search').addEventListener('input', () => {
-        renderAlerts([], false);  // re-render with filter
+    let searchDebounceTimeout = null;
+
+    document.getElementById('plate-search').addEventListener('input', (e) => {
+        clearTimeout(searchDebounceTimeout);
+        const query = e.target.value.trim();
+
+        if (query.length === 0) {
+            // Reset to live alerts feed immediately
+            fetchAlerts();
+            return;
+        }
+
+        // Debounce search
+        searchDebounceTimeout = setTimeout(async () => {
+            try {
+                const res = await fetch(`${API_BASE}/api/alerts/search?plate=${encodeURIComponent(query)}`);
+                const data = await res.json();
+                
+                const container = document.getElementById('alerts-list');
+                if (!data.results || data.results.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-icon">🔎</div>
+                            <div class="empty-title">No detections found for "${query}"</div>
+                            <div class="empty-desc">Try a different plate number or partial match</div>
+                        </div>
+                    `;
+                } else {
+                    container.innerHTML = data.results.map(a => renderAlertCard(a, false)).join('');
+                }
+            } catch (e) {
+                console.error("Search failed:", e);
+            }
+        }, 300);
     });
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1139,10 +1275,61 @@
         overlay.classList.remove('active');
     }
 
-    // Escape key closes the modal
+    // Escape key closes modals
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') closeStreamModal();
+        if (e.key === 'Escape') {
+            closeStreamModal();
+            closeDetailModal();
+        }
     });
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Detail View Modal
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    const VTYPE_ICONS = {
+        'Sedan': '🚘', 'SUV': '🚙', 'Two-Wheeler': '🛵', 'Truck': '🚛', 'Hatchback': '🚗'
+    };
+
+    function openDetailModal(alertJsonEnc) {
+        try {
+            const alert = JSON.parse(decodeURIComponent(alertJsonEnc));
+            
+            document.getElementById('detail-plate').textContent = alert.plate_number || 'UNKNOWN';
+            
+            const confEl = document.getElementById('detail-conf');
+            confEl.textContent = alert.confidence != null ? (alert.confidence * 100).toFixed(1) + '%' : '—';
+            confEl.className = 'detail-value alert-confidence ' + confidenceClass(alert.confidence || 0);
+
+            document.getElementById('detail-time').textContent = formatTime(alert.detected_at || alert.timestamp);
+            document.getElementById('detail-area').textContent = alert.area_name || alert.camera_name || 'Unknown Area';
+            document.getElementById('detail-cam').textContent = alert.camera_id || '—';
+
+            // Vehicle type
+            const vtype = alert.vehicle_type || 'Unknown';
+            const vicon = VTYPE_ICONS[vtype] || '🚘';
+            document.getElementById('detail-vtype').textContent = `${vicon} ${vtype}`;
+
+            // Vehicle color
+            const vcolor = alert.vehicle_color || 'Unknown';
+            let colorDot = '⚪';
+            if (vcolor === 'Black') colorDot = '⚫';
+            else if (vcolor === 'Red') colorDot = '🔴';
+            else if (vcolor === 'Blue') colorDot = '🔵';
+            else if (vcolor === 'Silver' || vcolor === 'Grey') colorDot = '🔘';
+            
+            document.getElementById('detail-vcolor').textContent = `${colorDot} ${vcolor}`;
+
+            document.getElementById('detail-overlay').classList.add('active');
+        } catch (e) {
+            console.error("Failed to open detail modal:", e);
+        }
+    }
+
+    function closeDetailModal(event) {
+        if (event && event.target !== event.currentTarget) return;
+        document.getElementById('detail-overlay').classList.remove('active');
+    }
     </script>
 </body>
 </html>

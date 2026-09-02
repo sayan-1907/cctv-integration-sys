@@ -126,9 +126,8 @@ async def startup():
     # Ensure tables exist even if the consumer hasn't run yet
     conn = get_db()
     try:
-        from consumer import SCHEMA_SQL
-        conn.executescript(SCHEMA_SQL)
-        conn.commit()
+        from consumer import init_schema
+        init_schema(conn)
         logger.info("Database schema verified (SQLite: %s)", DB_PATH)
     except Exception as exc:
         logger.warning("Could not init schema on startup: %s", exc)
@@ -208,6 +207,8 @@ def get_alerts(
             a.snapshot_path,
             a.detected_at,
             a.ingested_at,
+            a.vehicle_type,
+            a.vehicle_color,
             c.latitude,
             c.longitude
         FROM anpr_alerts a
@@ -236,6 +237,39 @@ def get_alerts(
         conn.close()
 
     return {"alerts": alerts, "count": len(alerts)}
+
+
+@app.get("/api/alerts/search")
+def search_alerts(plate: str = Query(..., min_length=1)):
+    """
+    Search for ANPR alerts by plate number (partial, case-insensitive).
+    Returns detailed objects for the detail view modal.
+    """
+    query = """
+        SELECT
+            a.plate_number,
+            a.confidence,
+            a.detected_at as timestamp,
+            c.camera_name as area_name,
+            a.camera_id,
+            a.vehicle_type,
+            a.vehicle_color
+        FROM anpr_alerts a
+        LEFT JOIN camera_registry c ON a.camera_id = c.camera_id
+        WHERE a.camera_id NOT LIKE 'DEMO-%'
+          AND a.plate_number LIKE ?
+        ORDER BY a.detected_at DESC
+        LIMIT 100
+    """
+    
+    conn = get_db()
+    try:
+        cur = conn.execute(query, (f"%{plate}%",))
+        results = _rows_to_dicts(cur.fetchall())
+    finally:
+        conn.close()
+
+    return {"results": results, "count": len(results)}
 
 
 @app.get("/api/stats")
@@ -473,7 +507,8 @@ class AlertBroadcaster:
                 SELECT
                     a.id, a.camera_id, c.camera_name,
                     a.plate_number, a.confidence,
-                    a.detected_at, c.latitude, c.longitude
+                    a.detected_at, a.vehicle_type, a.vehicle_color,
+                    c.latitude, c.longitude
                 FROM anpr_alerts a
                 LEFT JOIN camera_registry c ON a.camera_id = c.camera_id
                 WHERE a.id > ?

@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS anpr_alerts (
     snapshot_path   TEXT,
     detected_at     TEXT NOT NULL,
     ingested_at     TEXT DEFAULT (datetime('now')),
+    vehicle_type    TEXT,
+    vehicle_color   TEXT,
     UNIQUE (camera_id, plate_number, detected_at)
 );
 
@@ -98,8 +100,17 @@ def connect_db(db_path: str):
 
 
 def init_schema(conn):
-    """Create tables and indexes if they don't exist."""
+    """Create tables and indexes if they don't exist, and migrate older schemas."""
     conn.executescript(SCHEMA_SQL)
+    
+    # Safe migration for new vehicle attributes
+    try:
+        conn.execute("ALTER TABLE anpr_alerts ADD COLUMN vehicle_type TEXT")
+        conn.execute("ALTER TABLE anpr_alerts ADD COLUMN vehicle_color TEXT")
+    except sqlite3.OperationalError:
+        # Columns likely already exist
+        pass
+        
     conn.commit()
     logger.info("Database schema initialized")
 
@@ -144,6 +155,12 @@ def handle_anpr_alert(conn, payload: dict):
 
     _ensure_camera_exists(conn, camera_id)
 
+    import random
+    
+    # Mock vehicle type and color if not provided by the edge layer
+    vehicle_type = payload.get("vehicle_type", random.choice(["Sedan", "SUV", "Two-Wheeler", "Truck", "Hatchback"]))
+    vehicle_color = payload.get("vehicle_color", random.choice(["White", "Black", "Silver", "Red", "Blue", "Grey"]))
+
     detected_at = datetime.fromtimestamp(
         payload["timestamp"], tz=timezone.utc
     ).isoformat()
@@ -151,8 +168,8 @@ def handle_anpr_alert(conn, payload: dict):
     conn.execute(
         """
         INSERT OR IGNORE INTO anpr_alerts
-            (camera_id, plate_number, confidence, snapshot_path, detected_at)
-        VALUES (?, ?, ?, ?, ?)
+            (camera_id, plate_number, confidence, snapshot_path, detected_at, vehicle_type, vehicle_color)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         (
             camera_id,
@@ -160,6 +177,8 @@ def handle_anpr_alert(conn, payload: dict):
             payload.get("confidence_score"),
             payload.get("snapshot_filepath"),
             detected_at,
+            vehicle_type,
+            vehicle_color,
         ),
     )
     conn.commit()
