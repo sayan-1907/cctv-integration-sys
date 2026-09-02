@@ -28,13 +28,18 @@ import time
 import sqlite3
 import asyncio
 import logging
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from contextlib import contextmanager
+from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
+import cv2
+import yaml
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 logger = logging.getLogger("layer4.api")
@@ -63,6 +68,45 @@ app.add_middleware(
 # Database path — same file consumer.py writes to
 DB_PATH = str(Path(__file__).resolve().parent.parent / "sentinel.db")
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Camera RTSP URL lookup (loaded from YAML config at startup)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Maps camera_id -> rtsp_url for the live stream endpoint.
+# Populated once at startup from all YAML configs found in config/.
+CAMERA_RTSP_URLS: dict[str, str] = {}
+
+# Tracks active stream threads so we can monitor/limit them
+_active_streams: dict[str, int] = {}  # camera_id -> viewer count
+_stream_lock = threading.Lock()
+MAX_STREAM_FPS = 10
+STREAM_JPEG_QUALITY = 65  # 0-100, lower = smaller frames = less bandwidth
+
+
+def _load_camera_urls():
+    """Scan config/ directory for YAML files and extract camera RTSP URLs."""
+    config_dir = Path(__file__).resolve().parent.parent / "config"
+    if not config_dir.exists():
+        logger.warning("Config directory not found: %s", config_dir)
+        return
+
+    for yaml_file in config_dir.glob("*.yaml"):
+        try:
+            with open(yaml_file, "r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f)
+            if not cfg or "cameras" not in cfg:
+                continue
+            for cam in cfg["cameras"]:
+                cam_id = cam.get("id")
+                rtsp_url = cam.get("rtsp_url")
+                if cam_id and rtsp_url and cam.get("enabled", True):
+                    # Skip mock streams (they aren't real RTSP)
+                    if isinstance(rtsp_url, str) and not rtsp_url.startswith("mock://"):
+                        CAMERA_RTSP_URLS[cam_id] = rtsp_url
+            logger.info("Loaded %d camera URLs from %s", len(CAMERA_RTSP_URLS), yaml_file.name)
+        except Exception as exc:
+            logger.warning("Failed to parse %s: %s", yaml_file, exc)
+
 
 def get_db() -> sqlite3.Connection:
     """
@@ -90,6 +134,10 @@ async def startup():
         logger.warning("Could not init schema on startup: %s", exc)
     finally:
         conn.close()
+
+    # Load camera RTSP URLs for the live stream endpoint
+    _load_camera_urls()
+    logger.info("Camera RTSP URL lookup ready: %d cameras available for live streaming", len(CAMERA_RTSP_URLS))
 
 
 @app.on_event("shutdown")
@@ -240,6 +288,117 @@ def get_stats():
         "unique_plates_today": unique_plates_today,
         "total_alerts": total_alerts,
     }
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Live Stream — MJPEG over HTTP
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+def _mjpeg_generator(camera_id: str, rtsp_url: str):
+    """
+    Generator that opens an independent cv2.VideoCapture connection
+    to the camera's RTSP feed and yields JPEG-encoded frames as
+    multipart MJPEG chunks.
+
+    The generator runs in a synchronous thread (FastAPI handles this
+    via StreamingResponse). When the client disconnects, the generator
+    is garbage-collected and the finally block releases the capture.
+    """
+    cap = None
+    frame_interval = 1.0 / MAX_STREAM_FPS
+
+    with _stream_lock:
+        _active_streams[camera_id] = _active_streams.get(camera_id, 0) + 1
+    logger.info("Live stream started for %s (viewers: %d)", camera_id, _active_streams.get(camera_id, 0))
+
+    try:
+        cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+        if not cap.isOpened():
+            logger.warning("Failed to open RTSP stream for %s: %s", camera_id, rtsp_url)
+            return
+
+        # Try to reduce capture buffer to minimize latency
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        consecutive_failures = 0
+        while True:
+            t0 = time.time()
+
+            ret, frame = cap.read()
+            if not ret:
+                consecutive_failures += 1
+                if consecutive_failures > 30:  # ~3 seconds of failures
+                    logger.warning("Stream %s: too many consecutive read failures, stopping", camera_id)
+                    break
+                time.sleep(0.1)
+                continue
+            consecutive_failures = 0
+
+            # Encode to JPEG
+            encode_params = [cv2.IMWRITE_JPEG_QUALITY, STREAM_JPEG_QUALITY]
+            ok, jpeg = cv2.imencode(".jpg", frame, encode_params)
+            if not ok:
+                continue
+
+            # Yield as multipart MJPEG frame
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n" +
+                jpeg.tobytes() +
+                b"\r\n"
+            )
+
+            # Throttle to target FPS
+            elapsed = time.time() - t0
+            if elapsed < frame_interval:
+                time.sleep(frame_interval - elapsed)
+
+    except GeneratorExit:
+        # Client disconnected — normal, clean exit
+        logger.info("Live stream client disconnected for %s", camera_id)
+    except Exception as exc:
+        logger.warning("Live stream error for %s: %s", camera_id, exc)
+    finally:
+        if cap is not None:
+            cap.release()
+        with _stream_lock:
+            count = _active_streams.get(camera_id, 1) - 1
+            if count <= 0:
+                _active_streams.pop(camera_id, None)
+            else:
+                _active_streams[camera_id] = count
+        logger.info("Live stream ended for %s", camera_id)
+
+
+@app.get("/api/cameras/{camera_id}/stream")
+def stream_camera(camera_id: str):
+    """
+    MJPEG live stream for a specific camera.
+    Returns a multipart/x-mixed-replace response that browsers
+    can display directly in an <img> tag.
+    """
+    rtsp_url = CAMERA_RTSP_URLS.get(camera_id)
+    if not rtsp_url:
+        raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found or has no RTSP URL")
+
+    return StreamingResponse(
+        _mjpeg_generator(camera_id, rtsp_url),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.get("/api/streams/active")
+def get_active_streams():
+    """Returns which cameras currently have active live stream viewers."""
+    with _stream_lock:
+        return {"active_streams": dict(_active_streams)}
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
