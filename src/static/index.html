@@ -696,14 +696,25 @@
             gap: 6px;
             padding: 5px 10px;
             border-radius: var(--radius-full);
-            background: #7f1d1d;
-            border: 1px solid #dc2626;
-            color: #fca5a5;
+            background: #1e293b;
+            border: 1px solid #334155;
+            color: #94a3b8;
             font-size: 0.68rem;
             font-weight: 700;
             letter-spacing: 0.8px;
             text-transform: uppercase;
             font-family: var(--font-mono);
+            cursor: pointer;
+            transition: background-color 0.2s, border-color 0.2s, color 0.2s, transform var(--transition-smooth);
+        }
+        .stream-live-badge:hover {
+            background: #334155;
+            transform: translateY(-1px);
+        }
+        .stream-live-badge.active {
+            background: #7f1d1d;
+            border: 1px solid #dc2626;
+            color: #fca5a5;
         }
 
         .stream-close-btn {
@@ -764,6 +775,10 @@
             display: block;
         }
 
+        .stream-body img.snapshot-mode {
+            opacity: 0.92;
+        }
+
         .stream-loading {
             position: absolute;
             inset: 0;
@@ -822,6 +837,18 @@
             border: 1px solid var(--border-subtle);
             color: var(--accent-cyan);
             font-family: var(--font-mono);
+        }
+
+        .sighting-badge {
+            font-size: 0.62rem;
+            padding: 1px 6px;
+            border-radius: var(--radius-full);
+            background: #1e293b;
+            border: 1px solid var(--border-subtle);
+            color: var(--accent-amber);
+            font-family: var(--font-mono);
+            font-weight: 700;
+            margin-left: 6px;
         }
         .cam-det-list {
             display: flex;
@@ -1080,10 +1107,10 @@
                             <span class="extract-dot"></span>
                             <span id="modal-extract-text">AI Extracting</span>
                         </button>
-                        <div class="stream-live-badge">
-                            <span class="pulse-dot"></span>
-                            LIVE
-                        </div>
+                        <button class="stream-live-badge" id="modal-live-toggle" onclick="toggleLiveStream()" title="Toggle live MJPEG stream (resource-intensive)">
+                            <span class="pulse-dot" id="live-toggle-dot"></span>
+                            <span id="live-toggle-text">LIVE OFF</span>
+                        </button>
                         <button class="stream-close-btn" onclick="closeStreamModal()" title="Close">✕</button>
                     </div>
                 </div>
@@ -1108,7 +1135,7 @@
                     </div>
                 </div>
                 <div class="stream-footer">
-                    <span>MJPEG Stream · ~<span class="stream-fps">10</span> FPS · Dynamic On-Demand Extraction</span>
+                    <span id="stream-footer-text">Snapshot Preview · Tap LIVE for full MJPEG stream</span>
                     <span>Press <kbd style="padding: 1px 4px; border: 1px solid var(--border-subtle); border-radius: 2px; font-family: var(--font-mono);">Esc</kbd> to close</span>
                 </div>
             </div>
@@ -1174,7 +1201,9 @@
     let ws = null, wsRetries = 0;
     let currentModalCameraId = null;
     let currentModalExtracting = true;
+    let currentModalLiveStream = false;  // default: snapshot mode (lightweight)
     let modalDetections = [];
+    let _snapshotRefreshInterval = null;
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // Map initialization
@@ -1298,11 +1327,13 @@
 
     function renderAlertCard(alert, isNew = false) {
         const conf = alert.confidence != null ? (alert.confidence * 100).toFixed(0) + '%' : '—';
+        const sightings = alert.sighting_count || 1;
+        const sightingBadge = sightings > 1 ? `<span class="sighting-badge">Seen ${sightings}×</span>` : '';
         const alertJson = encodeURIComponent(JSON.stringify(alert));
         return `
             <div class="alert-card ${isNew ? 'new-alert' : ''}" onclick="openDetailModal('${alertJson}')">
                 <div class="alert-top">
-                    <span class="alert-plate">${alert.plate_number || '???'}</span>
+                    <span class="alert-plate">${alert.plate_number || '???'}${sightingBadge}</span>
                     <span class="alert-confidence ${confidenceClass(alert.confidence || 0)}">${conf}</span>
                 </div>
                 <div class="alert-camera">${alert.area_name || alert.camera_name || alert.camera_id || '—'}</div>
@@ -1493,6 +1524,7 @@
     async function openStreamModal(cameraId, cameraName) {
         currentModalCameraId = cameraId;
         currentModalExtracting = true;
+        currentModalLiveStream = false;  // Always start in snapshot (lightweight) mode
         modalDetections = [];
 
         const overlay = document.getElementById('stream-overlay');
@@ -1503,6 +1535,9 @@
         const detList = document.getElementById('modal-det-list');
         const detCount = document.getElementById('modal-det-count');
         const scanline = document.getElementById('stream-scanline');
+        const liveToggle = document.getElementById('modal-live-toggle');
+        const liveToggleText = document.getElementById('live-toggle-text');
+        const footerText = document.getElementById('stream-footer-text');
 
         document.getElementById('stream-cam-name').textContent = cameraName || 'Camera Feed';
         document.getElementById('stream-cam-id').textContent = cameraId;
@@ -1513,9 +1548,14 @@
         if (detList) detList.innerHTML = '<div class="cam-det-empty"><span>📡</span> Scanning video stream for vehicles and plates...</div>';
         if (scanline) scanline.style.display = 'block';
 
+        // Reset live stream toggle to OFF (snapshot mode)
+        if (liveToggle) liveToggle.className = 'stream-live-badge';
+        if (liveToggleText) liveToggleText.textContent = 'LIVE OFF';
+        if (footerText) footerText.textContent = 'Snapshot Preview · Tap LIVE for full MJPEG stream';
+
         overlay.classList.add('active');
 
-        // Reset previous image handlers
+        // Start in SNAPSHOT mode — load a single JPEG thumbnail
         img.onload = function() {
             loading.classList.add('hidden');
             img.style.display = 'block';
@@ -1533,11 +1573,20 @@
             }
         };
 
-        // Start stream immediately so feed is visible without waiting
+        // Load single snapshot (lightweight — not a continuous stream)
         img.style.display = 'block';
-        img.src = `${API_BASE}/api/cameras/${cameraId}/stream?t=${Date.now()}`;
+        img.classList.add('snapshot-mode');
+        img.src = `${API_BASE}/api/cameras/${cameraId}/snapshot?t=${Date.now()}`;
 
-        // Safety fallback timer: ensure image is displayed if browser doesn't trigger onload for MJPEG stream
+        // Refresh snapshot every 3 seconds while in snapshot mode
+        if (_snapshotRefreshInterval) clearInterval(_snapshotRefreshInterval);
+        _snapshotRefreshInterval = setInterval(() => {
+            if (currentModalCameraId === cameraId && !currentModalLiveStream) {
+                img.src = `${API_BASE}/api/cameras/${cameraId}/snapshot?t=${Date.now()}`;
+            }
+        }, 3000);
+
+        // Safety fallback timer
         if (window._streamSafetyTimeout) clearTimeout(window._streamSafetyTimeout);
         window._streamSafetyTimeout = setTimeout(() => {
             if (overlay.classList.contains('active')) {
@@ -1562,7 +1611,15 @@
                 const res = await fetch(`${API_BASE}/api/cameras/${cameraId}/alerts?limit=15`);
                 const data = await res.json();
                 if (data.alerts && data.alerts.length > 0) {
-                    modalDetections = data.alerts;
+                    // Deduplicate by plate_number — keep best confidence per plate
+                    const plateMap = new Map();
+                    data.alerts.forEach(a => {
+                        const existing = plateMap.get(a.plate_number);
+                        if (!existing || (a.confidence || 0) > (existing.confidence || 0)) {
+                            plateMap.set(a.plate_number, a);
+                        }
+                    });
+                    modalDetections = Array.from(plateMap.values());
                     renderModalDetections();
                 }
             } catch (e) {
@@ -1576,6 +1633,46 @@
         // Continuous polling while modal is open (every 1.5s)
         if (window._modalPollInterval) clearInterval(window._modalPollInterval);
         window._modalPollInterval = setInterval(refreshModalDetections, 1500);
+    }
+
+    function toggleLiveStream() {
+        if (!currentModalCameraId) return;
+        const img = document.getElementById('stream-img');
+        const liveToggle = document.getElementById('modal-live-toggle');
+        const liveToggleText = document.getElementById('live-toggle-text');
+        const liveDot = document.getElementById('live-toggle-dot');
+        const footerText = document.getElementById('stream-footer-text');
+
+        if (currentModalLiveStream) {
+            // Switch to snapshot mode (lightweight)
+            currentModalLiveStream = false;
+            img.src = '';  // disconnect MJPEG stream
+            img.classList.add('snapshot-mode');
+            img.src = `${API_BASE}/api/cameras/${currentModalCameraId}/snapshot?t=${Date.now()}`;
+            if (liveToggle) liveToggle.className = 'stream-live-badge';
+            if (liveToggleText) liveToggleText.textContent = 'LIVE OFF';
+            if (footerText) footerText.textContent = 'Snapshot Preview · Tap LIVE for full MJPEG stream';
+
+            // Restart snapshot refresh
+            if (_snapshotRefreshInterval) clearInterval(_snapshotRefreshInterval);
+            _snapshotRefreshInterval = setInterval(() => {
+                if (currentModalCameraId && !currentModalLiveStream) {
+                    img.src = `${API_BASE}/api/cameras/${currentModalCameraId}/snapshot?t=${Date.now()}`;
+                }
+            }, 3000);
+        } else {
+            // Switch to full MJPEG live stream (resource-intensive)
+            currentModalLiveStream = true;
+            if (_snapshotRefreshInterval) {
+                clearInterval(_snapshotRefreshInterval);
+                _snapshotRefreshInterval = null;
+            }
+            img.classList.remove('snapshot-mode');
+            img.src = `${API_BASE}/api/cameras/${currentModalCameraId}/stream?t=${Date.now()}`;
+            if (liveToggle) liveToggle.className = 'stream-live-badge active';
+            if (liveToggleText) liveToggleText.textContent = 'LIVE';
+            if (footerText) footerText.textContent = 'MJPEG Stream · ~10 FPS · Dynamic On-Demand Extraction';
+        }
     }
 
     async function toggleExtraction() {
@@ -1617,6 +1714,10 @@
             clearInterval(window._modalPollInterval);
             window._modalPollInterval = null;
         }
+        if (_snapshotRefreshInterval) {
+            clearInterval(_snapshotRefreshInterval);
+            _snapshotRefreshInterval = null;
+        }
 
         const overlay = document.getElementById('stream-overlay');
         const img = document.getElementById('stream-img');
@@ -1626,7 +1727,9 @@
         img.onerror = null;
         img.src = '';
         img.style.display = 'none';
+        img.classList.remove('snapshot-mode');
         if (scanline) scanline.style.display = 'none';
+        currentModalLiveStream = false;
 
         overlay.classList.remove('active');
 
@@ -1649,22 +1752,34 @@
         const count = document.getElementById('modal-det-count');
         if (!list) return;
 
+        // Deduplicate by plate_number — keep best confidence per plate
+        const plateMap = new Map();
+        modalDetections.forEach(a => {
+            const existing = plateMap.get(a.plate_number);
+            if (!existing || (a.confidence || 0) > (existing.confidence || 0)) {
+                plateMap.set(a.plate_number, a);
+            }
+        });
+        const uniqueDetections = Array.from(plateMap.values());
+
         if (count) {
-            count.textContent = `${modalDetections.length} detection${modalDetections.length !== 1 ? 's' : ''}`;
+            count.textContent = `${uniqueDetections.length} unique plate${uniqueDetections.length !== 1 ? 's' : ''}`;
         }
 
-        if (modalDetections.length === 0) {
+        if (uniqueDetections.length === 0) {
             list.innerHTML = '<div class="cam-det-empty"><span>📡</span> Scanning video stream for vehicles and plates...</div>';
             return;
         }
 
-        list.innerHTML = modalDetections.map(a => {
+        list.innerHTML = uniqueDetections.map(a => {
             const conf = a.confidence != null ? (a.confidence * 100).toFixed(0) + '%' : '—';
             const vicon = VTYPE_ICONS[a.vehicle_type] || '🚘';
+            const sightings = a.sighting_count || 1;
+            const sightingTag = sightings > 1 ? `<span class="sighting-badge">×${sightings}</span>` : '';
             const alertJson = encodeURIComponent(JSON.stringify(a));
             return `
                 <div class="cam-det-card" onclick="openDetailModal('${alertJson}')">
-                    <div class="cam-det-plate">${a.plate_number || '???'}</div>
+                    <div class="cam-det-plate">${a.plate_number || '???'}${sightingTag}</div>
                     <div class="cam-det-meta">
                         <span style="color: var(--text-muted);">${vicon} ${a.vehicle_type || 'Vehicle'}</span>
                         <span class="alert-confidence ${confidenceClass(a.confidence || 0)}">${conf}</span>

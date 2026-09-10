@@ -213,6 +213,33 @@ def _mask_rtsp_url(url: str) -> str:
             return "rtsp://***:***@..."
     return url
 
+<<<<<<< HEAD
+=======
+# Per-camera plate dedup window (seconds). Much longer than the Layer 2
+# pipeline's 10s window because the simulated extraction cycles through
+# the candidate pool fast and re-emits the same plates repeatedly.
+ON_DEMAND_DEDUP_WINDOW_S = 60
+
+def _probe_rtsp_online(url: str, timeout: float = 0.35) -> bool:
+    """Fast non-blocking TCP socket check to see if an RTSP endpoint is online."""
+    if not url or str(url).startswith("mock://") or url == "0" or url == 0:
+        return False
+    try:
+        from urllib.parse import urlparse
+        import socket
+        parsed = urlparse(url)
+        host = parsed.hostname
+        port = parsed.port or 554
+        if not host:
+            return False
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        code = sock.connect_ex((host, port))
+        sock.close()
+        return code == 0
+    except Exception:
+        return False
+>>>>>>> 63fb646 (feat: implement plate deduplication, live stream toggle, and background grid extraction)
 
 def generate_standby_frame(
     camera_id: str,
@@ -380,7 +407,9 @@ class CameraSession:
         self.thread: Optional[threading.Thread] = None
         self.condition = threading.Condition()
         self.recent_alerts: list[dict] = []
-        self.recent_plates: dict[str, float] = {}
+        self.recent_plates: dict[str, float] = {}  # plate_number -> last_emitted_ts
+        self.plate_best_conf: dict[str, float] = {}  # plate_number -> best confidence
+        self.plate_sighting_count: dict[str, int] = {}  # plate_number -> times seen
         self.last_inference_ts = 0.0
         self.last_activity = time.time()
         self.frame_seq = 0
@@ -625,52 +654,196 @@ class OnDemandExtractionManager:
         # Broadcast immediately to all WebSocket clients
         broadcaster.broadcast_sync([alert])
 
-    def trigger_extraction_event(self, session: CameraSession, frame: np.ndarray, timestamp: float):
-        if session.in_mock_fallback:
+
+    def _is_plate_duplicate(self, session: CameraSession, plate_number: str, confidence: float) -> bool:
+        """
+        Check if this plate was recently emitted for this camera.
+        If yes, update best confidence and sighting count but don't re-emit.
+        Returns True if this is a duplicate (should be suppressed).
+        """
+        now = time.time()
+        with session.lock:
+            last_seen = session.recent_plates.get(plate_number)
+            if last_seen is not None and (now - last_seen) < ON_DEMAND_DEDUP_WINDOW_S:
+                # Duplicate within cooldown — update stats but suppress alert
+                session.plate_sighting_count[plate_number] = session.plate_sighting_count.get(plate_number, 1) + 1
+                if confidence > session.plate_best_conf.get(plate_number, 0):
+                    session.plate_best_conf[plate_number] = confidence
+                    # Update the existing alert in recent_alerts with better confidence
+                    for alert in session.recent_alerts:
+                        if alert["plate_number"] == plate_number:
+                            alert["confidence"] = confidence
+                            alert["sighting_count"] = session.plate_sighting_count[plate_number]
+                            break
+                    # Also update in DB
+                    try:
+                        conn = get_db()
+                        conn.execute(
+                            "UPDATE anpr_alerts SET confidence = ? WHERE camera_id = ? AND plate_number = ? AND confidence < ?",
+                            (confidence, session.camera_id, plate_number, confidence)
+                        )
+                        conn.commit()
+                        conn.close()
+                    except Exception:
+                        pass
+                return True
+            # New plate or cooldown expired — record it
+            session.recent_plates[plate_number] = now
+            session.plate_best_conf[plate_number] = confidence
+            session.plate_sighting_count[plate_number] = 1
+            return False
+
+    def trigger_extraction_event(self, session: CameraSession, frame: np.ndarray, timestamp: float, plate_info: tuple[str, str, str]):
+        det_at = datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
+
+        # If live video stream is active, run the real YOLOv8 + OCR model!
+        if not session.in_mock_fallback:
+            models = self.get_models()
+            if models is not None:
+                try:
+                    from ai_worker import FrameEnvelope, process_frame
+                    envelope = FrameEnvelope(session.camera_id, timestamp, frame, session.frame_seq)
+                    detections = process_frame(envelope, models, self.layer2_config)
+                    if detections:
+                        for det in detections:
+                            conf = round(float(det.confidence_score), 2)
+                            if self._is_plate_duplicate(session, det.plate_number, conf):
+                                continue  # suppressed — already seen recently
+                            cam_dir = SNAPSHOTS_DIR / session.camera_id
+                            cam_dir.mkdir(parents=True, exist_ok=True)
+                            snap_filename = f"{int(timestamp * 1000)}_{det.plate_number}.jpg"
+                            snap_path = cam_dir / snap_filename
+                            cv2.imwrite(str(snap_path), det.crop, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                            snap_url = f"/snapshots/{session.camera_id}/{snap_filename}"
+                            cfg = CAMERA_CONFIGS.get(session.camera_id, {})
+                            alert = {
+                                "camera_id": session.camera_id,
+                                "camera_name": session.camera_name,
+                                "area_name": session.camera_name,
+                                "plate_number": det.plate_number,
+                                "confidence": conf,
+                                "detected_at": det_at,
+                                "timestamp": det_at,
+                                "vehicle_type": "Vehicle",
+                                "vehicle_color": "Identified",
+                                "snapshot_path": snap_url,
+                                "latitude": cfg.get("latitude"),
+                                "longitude": cfg.get("longitude"),
+                                "sighting_count": 1,
+                            }
+                            self.persist_and_broadcast(alert)
+                            with session.lock:
+                                session.recent_alerts.insert(0, alert)
+                                if len(session.recent_alerts) > 50:
+                                    session.recent_alerts.pop()
+                            logger.info("[%s] Real YOLO Model extracted: %s (conf=%.2f)",
+                                        session.camera_id, det.plate_number, det.confidence_score)
+                        return
+                except Exception as e:
+                    logger.error("[%s] Real YOLO inference error: %s", session.camera_id, e)
+
+        # Fallback simulated extraction (used when RTSP is offline / 401 Unauthorized)
+        plate_cand, vtype, vcolor = plate_info
+        conf = round(random.uniform(0.92, 0.99), 2)
+
+        # Dedup check — suppress if this plate was already emitted recently
+        if self._is_plate_duplicate(session, plate_cand, conf):
+            # Still advance to next candidate so we don't get stuck
+            with session.lock:
+                session.plate_idx = (session.plate_idx + 1) % len(CANDIDATE_PLATES)
+                session.current_plate_info = CANDIDATE_PLATES[session.plate_idx]
             return
 
-        det_at = datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
-        models = self.get_models()
-        if models is not None:
-            try:
-                from ai_worker import FrameEnvelope, process_frame
-                envelope = FrameEnvelope(session.camera_id, timestamp, frame, session.frame_seq)
-                detections = process_frame(envelope, models, self.layer2_config)
-                if detections:
-                    for det in detections:
-                        cam_dir = SNAPSHOTS_DIR / session.camera_id
-                        cam_dir.mkdir(parents=True, exist_ok=True)
-                        snap_filename = f"{int(timestamp * 1000)}_{det.plate_number}.jpg"
-                        snap_path = cam_dir / snap_filename
-                        cv2.imwrite(str(snap_path), det.crop, [cv2.IMWRITE_JPEG_QUALITY, 75])
-                        snap_url = f"/snapshots/{session.camera_id}/{snap_filename}"
-                        cfg = CAMERA_CONFIGS.get(session.camera_id, {})
-                        alert = {
-                            "camera_id": session.camera_id,
-                            "camera_name": session.camera_name,
-                            "area_name": session.camera_name,
-                            "plate_number": det.plate_number,
-                            "confidence": round(float(det.confidence_score), 2),
-                            "detected_at": det_at,
-                            "timestamp": det_at,
-                            "vehicle_type": "Vehicle",
-                            "vehicle_color": "Identified",
-                            "snapshot_path": snap_url,
-                            "latitude": cfg.get("latitude"),
-                            "longitude": cfg.get("longitude"),
-                        }
-                        self.persist_and_broadcast(alert)
-                        with session.lock:
-                            session.recent_alerts.insert(0, alert)
-                            if len(session.recent_alerts) > 50:
-                                session.recent_alerts.pop()
-                        logger.info("[%s] Real YOLO Model extracted: %s (conf=%.2f)",
-                                    session.camera_id, det.plate_number, det.confidence_score)
-            except Exception as e:
-                logger.error("[%s] Real YOLO inference error: %s", session.camera_id, e)
+        h, w = frame.shape[:2]
+        crop = frame[max(0, h // 4):min(h, 3 * h // 4), max(0, w // 4):min(w, 3 * w // 4)]
+        cam_dir = SNAPSHOTS_DIR / session.camera_id
+        cam_dir.mkdir(parents=True, exist_ok=True)
+        snap_filename = f"{int(timestamp * 1000)}_{plate_cand}.jpg"
+        snap_path = cam_dir / snap_filename
+        cv2.imwrite(str(snap_path), crop, [cv2.IMWRITE_JPEG_QUALITY, 75])
+        snap_url = f"/snapshots/{session.camera_id}/{snap_filename}"
 
+        cfg = CAMERA_CONFIGS.get(session.camera_id, {})
+
+        alert = {
+            "camera_id": session.camera_id,
+            "camera_name": session.camera_name,
+            "area_name": session.camera_name,
+            "plate_number": plate_cand,
+            "confidence": conf,
+            "detected_at": det_at,
+            "timestamp": det_at,
+            "vehicle_type": vtype,
+            "vehicle_color": vcolor,
+            "snapshot_path": snap_url,
+            "latitude": cfg.get("latitude"),
+            "longitude": cfg.get("longitude"),
+            "sighting_count": 1,
+        }
+        self.persist_and_broadcast(alert)
+        with session.lock:
+            session.recent_alerts.insert(0, alert)
+            if len(session.recent_alerts) > 50:
+                session.recent_alerts.pop()
+            # Advance to next vehicle in candidate pool
+            session.plate_idx = (session.plate_idx + 1) % len(CANDIDATE_PLATES)
+            session.current_plate_info = CANDIDATE_PLATES[session.plate_idx]
+                    session.camera_id, plate_cand, vtype, vcolor, conf)
 
 extraction_manager = OnDemandExtractionManager(max_concurrent_extractions=2)
+
+
+async def global_mock_extraction_loop():
+    """
+    Continuously runs in the background and simulates AI extraction
+    across ALL cameras, not just the one currently opened by the user.
+    This populates the global feed and simulates a fully active grid.
+    """
+    logger.info("Started global background mock extraction loop for all cameras")
+    
+    # Give the server a few seconds to fully start before spamming alerts
+    await asyncio.sleep(5.0)
+    
+    # Convert dict keys to a list once
+    camera_ids = list(CAMERA_CONFIGS.keys())
+    if not camera_ids:
+        return
+        
+    while True:
+        # Wait a short interval between global extractions (e.g. 1-3 seconds)
+        await asyncio.sleep(random.uniform(1.0, 3.0))
+        
+        try:
+            # Pick a random camera
+            camera_id = random.choice(camera_ids)
+            
+            # Use get_or_create_session which safely initializes a CameraSession
+            session = extraction_manager.get_or_create_session(camera_id)
+            
+            # If a user is actively viewing this camera and it's already extracting
+            # via the UI, let the UI thread handle it to avoid duplicate fast-fires.
+            if session.is_extracting and session.viewer_count > 0:
+                continue
+                
+            # Pick a random plate and generate a mock frame
+            plate_info = random.choice(CANDIDATE_PLATES)
+            cfg = CAMERA_CONFIGS.get(camera_id, {})
+            name = cfg.get("camera_name", camera_id)
+            
+            frame = generate_tactical_frame(camera_id, name, 0, True, plate_info)
+            
+            # Temporarily force in_mock_fallback to True for this event
+            # so we don't accidentally trigger a heavy real YOLO model inference
+            # in the background event loop thread.
+            was_mock = session.in_mock_fallback
+            session.in_mock_fallback = True
+            
+            extraction_manager.trigger_extraction_event(session, frame, time.time(), plate_info)
+            
+            session.in_mock_fallback = was_mock
+            
+        except Exception as e:
+            logger.error("Error in global mock extraction loop: %s", e)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -787,6 +960,7 @@ async def startup():
         conn.close()
 
     asyncio.create_task(broadcaster.start_polling())
+    asyncio.create_task(global_mock_extraction_loop())
 
 
 @app.on_event("shutdown")
@@ -832,21 +1006,25 @@ def get_alerts(
     camera_id: str = Query(default=None),
     plate: str = Query(default=None),
 ):
-    """Returns recent ANPR alerts, optionally filtered by camera or plate."""
+    """
+    Returns recent ANPR alerts, deduplicated by plate number.
+    Each unique plate shows the highest-confidence reading and a sighting_count.
+    """
     query = """
         SELECT
-            a.id,
+            MAX(a.id) as id,
             a.camera_id,
             c.camera_name,
             a.plate_number,
-            a.confidence,
+            MAX(a.confidence) as confidence,
             a.snapshot_path,
-            a.detected_at,
-            a.ingested_at,
+            MAX(a.detected_at) as detected_at,
+            MAX(a.ingested_at) as ingested_at,
             a.vehicle_type,
             a.vehicle_color,
             c.latitude,
-            c.longitude
+            c.longitude,
+            COUNT(*) as sighting_count
         FROM anpr_alerts a
         LEFT JOIN camera_registry c ON a.camera_id = c.camera_id
         WHERE 1=1
@@ -861,7 +1039,8 @@ def get_alerts(
         query += " AND a.plate_number LIKE ?"
         params.append(f"%{plate}%")
 
-    query += " ORDER BY a.detected_at DESC LIMIT ?"
+    query += " GROUP BY a.plate_number, a.camera_id"
+    query += " ORDER BY detected_at DESC LIMIT ?"
     params.append(limit)
 
     conn = get_db()
@@ -1081,6 +1260,38 @@ async def _mjpeg_generator(camera_id: str):
             session.viewer_count = max(0, session.viewer_count - 1)
             session.last_activity = time.time()
         logger.info("Viewer disconnected from %s (remaining viewers: %d)", camera_id, session.viewer_count)
+
+
+@app.get("/api/cameras/{camera_id}/snapshot")
+def snapshot_camera(camera_id: str):
+    """Returns a single JPEG frame for lightweight thumbnail view (no continuous stream)."""
+    if camera_id not in CAMERA_RTSP_URLS and camera_id not in CAMERA_CONFIGS:
+        raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found")
+
+    session = extraction_manager.sessions.get(camera_id)
+    if session:
+        jpeg = session.get_current_jpeg()
+        if jpeg:
+            return StreamingResponse(
+                iter([jpeg]),
+                media_type="image/jpeg",
+                headers={"Cache-Control": "no-cache, no-store", "Pragma": "no-cache"},
+            )
+
+    # No active session — generate a single tactical frame as thumbnail
+    cfg = CAMERA_CONFIGS.get(camera_id, {})
+    name = cfg.get("camera_name", camera_id)
+    plate_idx = abs(hash(camera_id)) % len(CANDIDATE_PLATES)
+    plate_info = CANDIDATE_PLATES[plate_idx]
+    frame = generate_tactical_frame(camera_id, name, 0, False, plate_info)
+    ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, STREAM_JPEG_QUALITY])
+    if ok:
+        return StreamingResponse(
+            iter([jpeg.tobytes()]),
+            media_type="image/jpeg",
+            headers={"Cache-Control": "no-cache, no-store", "Pragma": "no-cache"},
+        )
+    raise HTTPException(status_code=500, detail="Failed to generate snapshot")
 
 
 @app.get("/api/cameras/{camera_id}/stream")
