@@ -33,6 +33,23 @@ logger = logging.getLogger("layer1.orchestrator")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
+def _load_env_file():
+    env_file = Path(__file__).resolve().parent.parent / ".env"
+    if env_file.exists():
+        try:
+            import os
+            with open(env_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        k, v = k.strip(), v.strip().strip("'\"")
+                        if k not in os.environ:
+                            os.environ[k] = v
+        except Exception as e:
+            logger.warning("Could not read .env: %s", e)
+
+
 class EdgeOrchestrator:
     def __init__(self, config_path: str):
         self.config_path = Path(config_path)
@@ -51,7 +68,31 @@ class EdgeOrchestrator:
             return yaml.safe_load(f)
 
     def _enabled_cameras(self) -> list[dict]:
-        cams = [c for c in self.config["cameras"] if c.get("enabled", True)]
+        import os
+        import urllib.parse
+        _load_env_file()
+        auth_email = os.environ.get("RTSP_AUTH_EMAIL") or os.environ.get("CCTV_EMAIL")
+        auth_pass = os.environ.get("RTSP_AUTH_PASSWORD") or os.environ.get("CCTV_PASSWORD")
+        cfg_auth = self.config.get("auth", {})
+        email = auth_email or cfg_auth.get("email")
+        pwd = auth_pass or cfg_auth.get("password")
+
+        cred_prefix = ""
+        if email and pwd:
+            enc_email = urllib.parse.quote(str(email), safe="")
+            enc_pass = urllib.parse.quote(str(pwd), safe="")
+            cred_prefix = f"{enc_email}:{enc_pass}@"
+
+        cams = []
+        for c in self.config.get("cameras", []):
+            if not c.get("enabled", True):
+                continue
+            cam_copy = dict(c)
+            rtsp = str(cam_copy.get("rtsp_url", ""))
+            if cred_prefix and "@" not in rtsp and rtsp.startswith("rtsp://"):
+                cam_copy["rtsp_url"] = rtsp.replace("rtsp://", f"rtsp://{cred_prefix}", 1)
+            cams.append(cam_copy)
+
         limit = self.config["max_concurrent_streams"]
         if len(cams) > limit:
             logger.warning(

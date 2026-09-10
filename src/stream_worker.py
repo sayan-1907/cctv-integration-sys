@@ -185,18 +185,25 @@ def run_camera_worker(
             heartbeat_dict[camera_id] = {"status": "connected", "last_frame_ts": time.time()}
             last_emit = 0.0
 
+            last_frame_ts = time.time()
+
             while not shutdown_event.is_set():
                 grabbed = cap.grab()  # cheap — just advances the decoder position
                 if not grabbed:
-                    raise ConnectionError("Stream stopped delivering frames")
+                    time.sleep(0.01)
+                    if time.time() - last_frame_ts > stall_timeout_s:
+                        raise ConnectionError(f"Stream stalled: no frames received for {stall_timeout_s}s")
+                    continue
 
                 now = time.time()
+                last_frame_ts = now
                 if now - last_emit < frame_interval:
                     continue  # throttle: skip decode entirely for dropped frames
 
                 ok, frame = cap.retrieve()  # only decode frames we're actually keeping
                 if not ok or frame is None:
-                    raise ConnectionError("Frame retrieve failed")
+                    time.sleep(0.01)
+                    continue
 
                 last_emit = now
                 seq += 1

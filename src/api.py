@@ -202,184 +202,166 @@ broadcaster = AlertBroadcaster()
 # Tactical Live Stream Simulation & Non-Blocking Camera Session
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-CANDIDATE_PLATES = [
-    ("GJ01AB1234", "Sedan", "Silver"),
-    ("GJ27BK8890", "SUV", "Black"),
-    ("GJ05CD5678", "Hatchback", "White"),
-    ("GJ03EF9012", "Sedan", "Red"),
-    ("GJ06GH3456", "SUV", "Blue"),
-    ("GJ01XX9988", "Sedan", "White"),
-    ("GJ18AA5544", "Truck", "Grey"),
-    ("GJ02ZZ1122", "SUV", "Black"),
-    ("GJ10MN4321", "Hatchback", "Silver"),
-    ("GJ12PQ6789", "Sedan", "Blue"),
-]
+def _mask_rtsp_url(url: str) -> str:
+    """Mask credentials in RTSP URL for secure diagnostic display."""
+    if "@" in url:
+        try:
+            proto, rest = url.split("://", 1)
+            creds, hostpath = rest.split("@", 1)
+            return f"{proto}://***:***@{hostpath}"
+        except Exception:
+            return "rtsp://***:***@..."
+    return url
 
-def _probe_rtsp_online(url: str, timeout: float = 0.35) -> bool:
-    """Fast non-blocking TCP socket check to see if an RTSP endpoint is online."""
-    if not url or str(url).startswith("mock://") or url == "0" or url == 0:
-        return False
-    try:
-        from urllib.parse import urlparse
-        import socket
-        parsed = urlparse(url)
-        host = parsed.hostname
-        port = parsed.port or 554
-        if not host:
-            return False
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        code = sock.connect_ex((host, port))
-        sock.close()
-        return code == 0
-    except Exception:
-        return False
 
-def generate_tactical_frame(
+def generate_standby_frame(
     camera_id: str,
     camera_name: str,
-    seq: int,
-    is_extracting: bool,
-    plate_info: tuple[str, str, str],
+    rtsp_url: str,
+    status_text: str = "AWAITING RTSP FEED",
 ) -> np.ndarray:
+    """
+    Renders an authentic, professional CCTV / VMS standby diagnostic test pattern.
+    Zero cartoons, zero road animations, zero simulated cars.
+    """
     w, h = 640, 360
     frame = np.zeros((h, w, 3), dtype=np.uint8)
+    # Background slate: dark surveillance charcoal (#0e1117 / BGR: 23, 17, 14)
+    frame[:] = (23, 17, 14)
 
-    # Road surface
-    frame[70:h, :] = (26, 30, 38)
+    # Subtle surveillance grid lines
+    for x in range(40, w, 60):
+        cv2.line(frame, (x, 0), (x, h), (32, 26, 20), 1)
+    for y in range(40, h, 60):
+        cv2.line(frame, (0, y), (w, y), (32, 26, 20), 1)
 
-    # Lane markings (smoothly moving forward)
-    offset = int((seq * 7) % 36)
-    for y in range(70, h, 36):
-        actual_y = y + offset
-        if actual_y < h:
-            cv2.line(frame, (w // 2, actual_y), (w // 2, min(h, actual_y + 18)), (210, 215, 225), 2)
-            cv2.line(frame, (w // 4, actual_y), (w // 4, min(h, actual_y + 14)), (90, 100, 115), 1)
-            cv2.line(frame, (3 * w // 4, actual_y), (3 * w // 4, min(h, actual_y + 14)), (90, 100, 115), 1)
+    # Tactical corner reticles [ + ]
+    reticle_color = (65, 55, 45)
+    margin = 16
+    arm = 14
+    # Top-left
+    cv2.line(frame, (margin, margin), (margin + arm, margin), reticle_color, 1)
+    cv2.line(frame, (margin, margin), (margin, margin + arm), reticle_color, 1)
+    # Top-right
+    cv2.line(frame, (w - margin, margin), (w - margin - arm, margin), reticle_color, 1)
+    cv2.line(frame, (w - margin, margin), (w - margin, margin + arm), reticle_color, 1)
+    # Bottom-left
+    cv2.line(frame, (margin, h - margin), (margin + arm, h - margin), reticle_color, 1)
+    cv2.line(frame, (margin, h - margin), (margin, h - margin - arm), reticle_color, 1)
+    # Bottom-right
+    cv2.line(frame, (w - margin, h - margin), (w - margin - arm, h - margin), reticle_color, 1)
+    cv2.line(frame, (w - margin, h - margin), (w - margin, h - margin - arm), reticle_color, 1)
 
-    # Road shoulder edges
-    cv2.line(frame, (50, 70), (15, h), (75, 85, 105), 2)
-    cv2.line(frame, (w - 50, 70), (w - 15, h), (75, 85, 105), 2)
-
-    plate_str, vtype_str, vcolor_str = plate_info
-
-    # Moving Vehicle in primary lane (approaching camera)
-    progress = (seq % 100) / 100.0
-    car_y = int(75 + progress * (h - 135))
-    car_scale = 0.5 + progress * 0.75
-
-    car_w = int(140 * car_scale)
-    car_h = int(90 * car_scale)
-    car_x = int(380 - (car_w // 2) + np.sin(progress * np.pi) * 15)
-
-    # Vehicle body color
-    body_color = (180, 185, 195) if vcolor_str == "Silver" else (
-        (30, 30, 35) if vcolor_str == "Black" else (
-            (240, 240, 245) if vcolor_str == "White" else (
-                (40, 40, 200) if vcolor_str == "Red" else (
-                    (190, 80, 40) if vcolor_str == "Blue" else (120, 125, 135)
-                )
-            )
-        )
-    )
-
-    cv2.rectangle(frame, (car_x, car_y), (car_x + car_w, car_y + car_h), (35, 42, 55), -1)
-    cv2.rectangle(frame, (car_x + 4, car_y + int(car_h * 0.18)), (car_x + car_w - 4, car_y + int(car_h * 0.72)), body_color, -1)
-
-    # Glass / windshield
-    cv2.rectangle(frame, (car_x + int(car_w * 0.14), car_y + int(car_h * 0.22)), (car_x + int(car_w * 0.86), car_y + int(car_h * 0.52)), (20, 24, 32), -1)
-
-    # Taillights
-    light_w = max(4, int(14 * car_scale))
-    light_h = max(2, int(7 * car_scale))
-    cv2.rectangle(frame, (car_x + 6, car_y + car_h - 15), (car_x + 6 + light_w, car_y + car_h - 15 + light_h), (20, 20, 220), -1)
-    cv2.rectangle(frame, (car_x + car_w - 6 - light_w, car_y + car_h - 15), (car_x + car_w - 6, car_y + car_h - 15 + light_h), (20, 20, 220), -1)
-
-    # Indian License Plate Box on the rear bumper
-    plate_w = max(38, int(68 * car_scale))
-    plate_h = max(11, int(17 * car_scale))
-    plate_x = car_x + (car_w - plate_w) // 2
-    plate_y = car_y + car_h - plate_h - 4
-
-    # Plate graphic: White base with blue IND badge
-    cv2.rectangle(frame, (plate_x, plate_y), (plate_x + plate_w, plate_y + plate_h), (252, 252, 252), -1)
-    cv2.rectangle(frame, (plate_x, plate_y), (plate_x + int(plate_w * 0.12), plate_y + plate_h), (180, 50, 20), -1)
-    cv2.rectangle(frame, (plate_x, plate_y), (plate_x + plate_w, plate_y + plate_h), (0, 0, 0), 1)
-
-    plate_font_scale = max(0.26, car_scale * 0.33)
+    # Header Telemetry Bar
+    cv2.rectangle(frame, (0, 0), (w, 34), (16, 12, 9), -1)
+    cv2.line(frame, (0, 34), (w, 34), (45, 38, 30), 1)
     cv2.putText(
         frame,
-        plate_str,
-        (plate_x + int(plate_w * 0.15), plate_y + int(plate_h * 0.76)),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        plate_font_scale,
-        (0, 0, 0),
-        1,
-    )
-
-    # When extraction is ACTIVE: Draw tactical AI bounding boxes & confidence tags
-    if is_extracting:
-        # Vehicle detection box (Cyan)
-        cv2.rectangle(frame, (car_x - 3, car_y - 3), (car_x + car_w + 3, car_y + car_h + 3), (255, 229, 0), 2)
-        cv2.putText(
-            frame,
-            f"VEHICLE: {vtype_str.upper()} 96%",
-            (car_x - 3, max(20, car_y - 8)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.40,
-            (255, 229, 0),
-            1,
-        )
-
-        # License plate detection box (Amber / Gold)
-        cv2.rectangle(frame, (plate_x - 2, plate_y - 2), (plate_x + plate_w + 2, plate_y + plate_h + 2), (0, 215, 255), 2)
-        cv2.putText(
-            frame,
-            f"ALPR: {plate_str} [98%]",
-            (plate_x - 12, plate_y + plate_h + 13),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.36,
-            (0, 215, 255),
-            1,
-        )
-
-    # Top Telemetry Header Bar
-    cv2.rectangle(frame, (0, 0), (w, 38), (10, 14, 22), -1)
-    cv2.line(frame, (0, 38), (w, 38), (35, 45, 60), 1)
-    cv2.putText(
-        frame,
-        f"SENTINEL CAM: {camera_name} [{camera_id}]",
-        (12, 16),
+        f"SENTINEL CCTV  |  {camera_name.upper()} [{camera_id}]",
+        (16, 22),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.44,
-        (248, 250, 252),
+        (240, 243, 246),
         1,
     )
-
-    now_str = time.strftime("%Y-%m-%d %H:%M:%S")
-    status_label = "AI EXTRACTING (RTSP OFFLINE/401 FALLBACK)" if is_extracting else "STREAM (RTSP OFFLINE/401 FALLBACK)"
-    status_color = (0, 220, 255) if is_extracting else (148, 163, 184)
+    now_utc = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
     cv2.putText(
         frame,
-        f"{now_str}  |  {status_label}",
-        (12, 31),
+        now_utc,
+        (w - 185, 22),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.33,
-        status_color,
+        0.36,
+        (139, 148, 158),
         1,
     )
 
+    # Center Diagnostics Card
+    card_w, card_h = 510, 160
+    cx1 = (w - card_w) // 2
+    cy1 = 88
+    cx2 = cx1 + card_w
+    cy2 = cy1 + card_h
+
+    # Card background and border
+    cv2.rectangle(frame, (cx1, cy1), (cx2, cy2), (28, 22, 18), -1)
+    cv2.rectangle(frame, (cx1, cy1), (cx2, cy2), (56, 48, 38), 1)
+
+    # Status Pill / Banner inside card
+    is_auth_req = "401" in status_text or "CREDENTIAL" in status_text
+    pill_color = (35, 45, 205) if is_auth_req else (35, 140, 210)
+    cv2.rectangle(frame, (cx1 + 16, cy1 + 16), (cx2 - 16, cy1 + 44), (20, 16, 13), -1)
+    cv2.rectangle(frame, (cx1 + 16, cy1 + 16), (cx2 - 16, cy1 + 44), pill_color, 1)
     cv2.putText(
         frame,
-        "15 FPS · HD",
-        (w - 85, 16),
+        f"[FEED STANDBY]  {status_text}",
+        (cx1 + 24, cy1 + 35),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.36,
+        pill_color,
+        1,
+    )
+
+    # Target URL line
+    masked_url = _mask_rtsp_url(rtsp_url)
+    cv2.putText(
+        frame,
+        f"RTSP Source: {masked_url}",
+        (cx1 + 20, cy1 + 72),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.36,
+        (201, 209, 217),
+        1,
+    )
+
+    # Diagnostic messages
+    if is_auth_req:
+        msg1 = "Gateway authentication required (401 Unauthorized)."
+        msg2 = "Provide RTSP_AUTH_EMAIL and RTSP_AUTH_PASSWORD in .env"
+    else:
+        msg1 = "Connecting to remote gateway socket..."
+        msg2 = "Original camera feed will stream automatically upon connection."
+
+    cv2.putText(
+        frame,
+        msg1,
+        (cx1 + 20, cy1 + 104),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.35,
-        (100, 116, 139),
+        (139, 148, 158),
+        1,
+    )
+    cv2.putText(
+        frame,
+        msg2,
+        (cx1 + 20, cy1 + 128),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.35,
+        (139, 148, 158),
+        1,
+    )
+
+    # Footer status
+    cv2.putText(
+        frame,
+        "STANDBY · HD STREAM READY · AWAITING REAL FRAMES",
+        (16, h - 14),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.33,
+        (90, 80, 70),
+        1,
+    )
+    cv2.putText(
+        frame,
+        "TCP / PORT 8554",
+        (w - 120, h - 14),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.33,
+        (90, 80, 70),
         1,
     )
 
     return frame
+
 
 
 class CameraSession:
@@ -402,15 +384,14 @@ class CameraSession:
         self.last_inference_ts = 0.0
         self.last_activity = time.time()
         self.frame_seq = 0
-        self.in_mock_fallback = False
+        self.in_mock_fallback = True
         self.lock = threading.RLock()
 
-        # Initialize candidate plate
-        self.plate_idx = abs(hash(camera_id)) % len(CANDIDATE_PLATES)
-        self.current_plate_info = CANDIDATE_PLATES[self.plate_idx]
-
-        # Generate instant initial JPEG so stream never hangs on startup
-        initial_frame = generate_tactical_frame(self.camera_id, self.camera_name, 0, False, self.current_plate_info)
+        # Initial clean standby slate
+        initial_status = "AWAITING RTSP FEED"
+        if "103.250.160.189" in self.rtsp_url and "@" not in self.rtsp_url:
+            initial_status = "401 UNAUTHORIZED: GATEWAY CREDENTIALS REQUIRED IN .ENV"
+        initial_frame = generate_standby_frame(self.camera_id, self.camera_name, self.rtsp_url, initial_status)
         ok, initial_jpeg = cv2.imencode(".jpg", initial_frame, [cv2.IMWRITE_JPEG_QUALITY, STREAM_JPEG_QUALITY])
         self.latest_jpeg: Optional[bytes] = initial_jpeg.tobytes() if ok else None
         self.latest_frame: Optional[np.ndarray] = initial_frame
@@ -440,27 +421,13 @@ class CameraSession:
         self.manager.update_camera_status(self.camera_id, "idle")
 
     def _worker_loop(self):
-        logger.info("[%s] Worker loop running (source=%s)", self.camera_id, self.rtsp_url)
+        logger.info("[%s] Worker loop running (source=%s)", self.camera_id, _mask_rtsp_url(self.rtsp_url))
         cap = None
+        last_connect_attempt = 0.0
+        connect_cooldown = 3.5  # Attempt to reconnect every 3.5s
 
-        # Non-blocking probe to see if RTSP is truly reachable
-        is_online = _probe_rtsp_online(self.rtsp_url, timeout=0.35)
-        if is_online:
-            try:
-                import os
-                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|timeout;1500000"
-                cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                if not cap.isOpened():
-                    logger.warning("[%s] RTSP stream unreachable, falling back to simulated traffic feed", self.camera_id)
-                    self.in_mock_fallback = True
-                    cap = None
-            except Exception as e:
-                logger.warning("[%s] RTSP open exception: %s", self.camera_id, e)
-                self.in_mock_fallback = True
-                cap = None
-        else:
-            self.in_mock_fallback = True
+        import os
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|timeout;2000000"
 
         frame_interval = 1.0 / MAX_STREAM_FPS
         encode_params = [cv2.IMWRITE_JPEG_QUALITY, STREAM_JPEG_QUALITY]
@@ -469,29 +436,48 @@ class CameraSession:
             t0 = time.time()
             frame = None
 
+            # Attempt to connect or reconnect to RTSP feed
+            if cap is None or not cap.isOpened():
+                if t0 - last_connect_attempt >= connect_cooldown:
+                    last_connect_attempt = t0
+                    try:
+                        cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
+                        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                        if cap.isOpened():
+                            logger.info("[%s] Successfully connected to live RTSP feed!", self.camera_id)
+                            self.in_mock_fallback = False
+                        else:
+                            cap.release()
+                            cap = None
+                            self.in_mock_fallback = True
+                    except Exception as e:
+                        logger.warning("[%s] RTSP connect exception: %s", self.camera_id, e)
+                        cap = None
+                        self.in_mock_fallback = True
+
+            # If cap is open, grab and read real camera frame
             if cap is not None and cap.isOpened():
-                ret, frame = cap.read()
-                if not ret or frame is None:
+                ret, raw_frame = cap.read()
+                if ret and raw_frame is not None:
+                    frame = raw_frame
+                    self.in_mock_fallback = False
+                else:
+                    logger.warning("[%s] Failed to read frame from RTSP stream, will reconnect", self.camera_id)
                     cap.release()
                     cap = None
                     self.in_mock_fallback = True
 
+            # If no live frame available, render clean standby slate (zero cartoons)
             if frame is None:
-                # Cycle simulated plate every 80 frames (~5-6s)
-                if self.frame_seq % 80 == 0:
-                    self.plate_idx = (self.plate_idx + 1) % len(CANDIDATE_PLATES)
-                    self.current_plate_info = CANDIDATE_PLATES[self.plate_idx]
-                frame = generate_tactical_frame(
-                    self.camera_id,
-                    self.camera_name,
-                    self.frame_seq,
-                    self.is_extracting,
-                    self.current_plate_info,
-                )
+                self.in_mock_fallback = True
+                status_text = "CONNECTING TO RTSP FEED..."
+                if "103.250.160.189" in self.rtsp_url and "@" not in self.rtsp_url:
+                    status_text = "401 UNAUTHORIZED: GATEWAY CREDENTIALS REQUIRED IN .ENV"
+                frame = generate_standby_frame(self.camera_id, self.camera_name, self.rtsp_url, status_text)
 
             self.frame_seq += 1
 
-            # Encode and store latest JPEG
+            # Encode and store latest JPEG for MJPEG stream
             ok, jpeg = cv2.imencode(".jpg", frame, encode_params)
             if ok:
                 jpeg_bytes = jpeg.tobytes()
@@ -500,14 +486,13 @@ class CameraSession:
                     self.latest_frame = frame
                     self.condition.notify_all()
 
-            # Run on-demand AI extraction when active
-            if self.is_extracting:
+            # Run on-demand AI extraction ONLY when active AND receiving real frames
+            if self.is_extracting and not self.in_mock_fallback:
                 now = time.time()
-                # Run extraction event every 2.5s
-                if now - self.last_inference_ts >= 2.5:
+                if now - self.last_inference_ts >= 1.5:
                     self.last_inference_ts = now
                     try:
-                        self.manager.trigger_extraction_event(self, frame, now, self.current_plate_info)
+                        self.manager.trigger_extraction_event(self, frame, now)
                     except Exception as exc:
                         logger.error("[%s] Error during on-demand extraction: %s", self.camera_id, exc)
 
@@ -640,90 +625,49 @@ class OnDemandExtractionManager:
         # Broadcast immediately to all WebSocket clients
         broadcaster.broadcast_sync([alert])
 
-    def trigger_extraction_event(self, session: CameraSession, frame: np.ndarray, timestamp: float, plate_info: tuple[str, str, str]):
+    def trigger_extraction_event(self, session: CameraSession, frame: np.ndarray, timestamp: float):
+        if session.in_mock_fallback:
+            return
+
         det_at = datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
-
-        # If live video stream is active, run the real YOLOv8 + OCR model!
-        if not session.in_mock_fallback:
-            models = self.get_models()
-            if models is not None:
-                try:
-                    from ai_worker import FrameEnvelope, process_frame
-                    envelope = FrameEnvelope(session.camera_id, timestamp, frame, session.frame_seq)
-                    detections = process_frame(envelope, models, self.layer2_config)
-                    if detections:
-                        for det in detections:
-                            cam_dir = SNAPSHOTS_DIR / session.camera_id
-                            cam_dir.mkdir(parents=True, exist_ok=True)
-                            snap_filename = f"{int(timestamp * 1000)}_{det.plate_number}.jpg"
-                            snap_path = cam_dir / snap_filename
-                            cv2.imwrite(str(snap_path), det.crop, [cv2.IMWRITE_JPEG_QUALITY, 75])
-                            snap_url = f"/snapshots/{session.camera_id}/{snap_filename}"
-                            cfg = CAMERA_CONFIGS.get(session.camera_id, {})
-                            alert = {
-                                "camera_id": session.camera_id,
-                                "camera_name": session.camera_name,
-                                "area_name": session.camera_name,
-                                "plate_number": det.plate_number,
-                                "confidence": round(float(det.confidence_score), 2),
-                                "detected_at": det_at,
-                                "timestamp": det_at,
-                                "vehicle_type": "Vehicle",
-                                "vehicle_color": "Identified",
-                                "snapshot_path": snap_url,
-                                "latitude": cfg.get("latitude"),
-                                "longitude": cfg.get("longitude"),
-                            }
-                            self.persist_and_broadcast(alert)
-                            with session.lock:
-                                session.recent_alerts.insert(0, alert)
-                                if len(session.recent_alerts) > 50:
-                                    session.recent_alerts.pop()
-                            logger.info("[%s] Real YOLO Model extracted: %s (conf=%.2f)",
-                                        session.camera_id, det.plate_number, det.confidence_score)
-                        return
-                except Exception as e:
-                    logger.error("[%s] Real YOLO inference error: %s", session.camera_id, e)
-
-        # Fallback simulated extraction (used when RTSP is offline / 401 Unauthorized)
-        plate_cand, vtype, vcolor = plate_info
-        conf = round(random.uniform(0.92, 0.99), 2)
-
-        h, w = frame.shape[:2]
-        crop = frame[max(0, h // 4):min(h, 3 * h // 4), max(0, w // 4):min(w, 3 * w // 4)]
-        cam_dir = SNAPSHOTS_DIR / session.camera_id
-        cam_dir.mkdir(parents=True, exist_ok=True)
-        snap_filename = f"{int(timestamp * 1000)}_{plate_cand}.jpg"
-        snap_path = cam_dir / snap_filename
-        cv2.imwrite(str(snap_path), crop, [cv2.IMWRITE_JPEG_QUALITY, 75])
-        snap_url = f"/snapshots/{session.camera_id}/{snap_filename}"
-
-        cfg = CAMERA_CONFIGS.get(session.camera_id, {})
-
-        alert = {
-            "camera_id": session.camera_id,
-            "camera_name": session.camera_name,
-            "area_name": session.camera_name,
-            "plate_number": plate_cand,
-            "confidence": conf,
-            "detected_at": det_at,
-            "timestamp": det_at,
-            "vehicle_type": vtype,
-            "vehicle_color": vcolor,
-            "snapshot_path": snap_url,
-            "latitude": cfg.get("latitude"),
-            "longitude": cfg.get("longitude"),
-        }
-        self.persist_and_broadcast(alert)
-        with session.lock:
-            session.recent_alerts.insert(0, alert)
-            if len(session.recent_alerts) > 50:
-                session.recent_alerts.pop()
-            # Advance to next vehicle in candidate pool
-            session.plate_idx = (session.plate_idx + 1) % len(CANDIDATE_PLATES)
-            session.current_plate_info = CANDIDATE_PLATES[session.plate_idx]
-        logger.info("[%s] Real-time ANPR extracted: %s (%s, %s, conf=%.2f)",
-                    session.camera_id, plate_cand, vtype, vcolor, conf)
+        models = self.get_models()
+        if models is not None:
+            try:
+                from ai_worker import FrameEnvelope, process_frame
+                envelope = FrameEnvelope(session.camera_id, timestamp, frame, session.frame_seq)
+                detections = process_frame(envelope, models, self.layer2_config)
+                if detections:
+                    for det in detections:
+                        cam_dir = SNAPSHOTS_DIR / session.camera_id
+                        cam_dir.mkdir(parents=True, exist_ok=True)
+                        snap_filename = f"{int(timestamp * 1000)}_{det.plate_number}.jpg"
+                        snap_path = cam_dir / snap_filename
+                        cv2.imwrite(str(snap_path), det.crop, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                        snap_url = f"/snapshots/{session.camera_id}/{snap_filename}"
+                        cfg = CAMERA_CONFIGS.get(session.camera_id, {})
+                        alert = {
+                            "camera_id": session.camera_id,
+                            "camera_name": session.camera_name,
+                            "area_name": session.camera_name,
+                            "plate_number": det.plate_number,
+                            "confidence": round(float(det.confidence_score), 2),
+                            "detected_at": det_at,
+                            "timestamp": det_at,
+                            "vehicle_type": "Vehicle",
+                            "vehicle_color": "Identified",
+                            "snapshot_path": snap_url,
+                            "latitude": cfg.get("latitude"),
+                            "longitude": cfg.get("longitude"),
+                        }
+                        self.persist_and_broadcast(alert)
+                        with session.lock:
+                            session.recent_alerts.insert(0, alert)
+                            if len(session.recent_alerts) > 50:
+                                session.recent_alerts.pop()
+                        logger.info("[%s] Real YOLO Model extracted: %s (conf=%.2f)",
+                                    session.camera_id, det.plate_number, det.confidence_score)
+            except Exception as e:
+                logger.error("[%s] Real YOLO inference error: %s", session.camera_id, e)
 
 
 extraction_manager = OnDemandExtractionManager(max_concurrent_extractions=2)
