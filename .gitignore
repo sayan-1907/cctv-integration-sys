@@ -1,17 +1,62 @@
+# Virtual Environment
+.venv/
+env/
+venv/
+ENV/
+
+# Secrets & Environment variables
+.env
+*.env.local
+
 # Python
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# AI Models
+# AI Models (large binaries auto-downloaded on demand)
 *.pt
 yolov8n.pt
+*.onnx
 
-# Databases / Spill files
+# Databases & SQLite WAL files
 *.db
 *.db-shm
 *.db-wal
+sentinel.db
 kafka_spill/
 
-# Snapshots / Local Data
+# Snapshots & Generated Media
 snapshots/
 layer2/
+.tempmediaStorage/
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.webm
+!src/static/**/*
+!src/mock_plate.jpg
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

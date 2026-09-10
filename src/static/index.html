@@ -4,52 +4,54 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sentinel — ANPR Command Center</title>
-    <meta name="description" content="Real-time ANPR surveillance dashboard with live camera feeds, plate detection alerts, and spatial analytics.">
+    <meta name="description" content="Tactical ANPR surveillance dashboard with live camera feeds, on-demand plate extraction, and spatial grid analytics.">
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
     <style>
-        /* ─────────────── Design Tokens ─────────────── */
+        /* ─────────────── Tactical Solid Design Tokens (Solid Colors) ─────────────── */
         :root {
-            --bg-primary:     #0a0e17;
-            --bg-secondary:   #111827;
-            --bg-card:        rgba(17, 24, 39, 0.75);
-            --bg-glass:       rgba(17, 24, 39, 0.55);
-            --border-subtle:  rgba(255, 255, 255, 0.06);
-            --border-glow:    rgba(99, 102, 241, 0.3);
+            /* Solid surfaces — strictly solid colors */
+            --bg-primary:     #080b11;
+            --bg-secondary:   #0e131d;
+            --bg-card:        #111723;
+            --bg-panel:       #0d121c;
+            --border-subtle:  #1d2636;
+            --border-active:  #2f3c52;
+            --border-focus:   #0284c7;
 
-            --text-primary:   #f1f5f9;
+            --text-primary:   #f8fafc;
             --text-secondary: #94a3b8;
             --text-muted:     #64748b;
 
-            --accent-indigo:  #818cf8;
-            --accent-blue:    #60a5fa;
-            --accent-cyan:    #22d3ee;
-            --accent-emerald: #34d399;
-            --accent-amber:   #fbbf24;
-            --accent-rose:    #fb7185;
-            --accent-purple:  #a78bfa;
+            /* Crisp solid tactical accents */
+            --accent-cyan:    #00e5ff;
+            --accent-blue:    #38bdf8;
+            --accent-emerald: #10b981;
+            --accent-amber:   #f59e0b;
+            --accent-rose:    #ef4444;
+            --accent-slate:   #475569;
 
-            --gradient-hero:  linear-gradient(135deg, #818cf8 0%, #22d3ee 50%, #34d399 100%);
-            --gradient-card:  linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(34,211,153,0.04) 100%);
+            /* Ergonomic rounded geometry */
+            --radius-xs:   4px;
+            --radius-sm:   8px;
+            --radius-md:   12px;
+            --radius-lg:   16px;
+            --radius-xl:   20px;
+            --radius-full: 9999px;
 
-            --radius-sm: 8px;
-            --radius-md: 12px;
-            --radius-lg: 16px;
-            --radius-xl: 20px;
-
-            --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--border-subtle);
-            --shadow-glow: 0 0 30px rgba(99, 102, 241, 0.15);
-
+            --shadow-card:  0 6px 20px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--border-subtle);
+            --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.8), 0 0 0 1px var(--border-active);
             --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
-            --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            --transition-fast:   0.15s ease-out;
+            --transition-smooth: 0.25s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         /* ─────────────── Reset & Base ─────────────── */
@@ -61,22 +63,51 @@
             font-family: var(--font-sans);
             background: var(--bg-primary);
             color: var(--text-primary);
-            line-height: 1.6;
+            line-height: 1.5;
             overflow-x: hidden;
             min-height: 100vh;
         }
 
-        /* Animated background mesh */
-        body::before {
-            content: '';
-            position: fixed;
-            inset: 0;
-            background:
-                radial-gradient(ellipse 80% 60% at 20% 10%, rgba(99, 102, 241, 0.08) 0%, transparent 60%),
-                radial-gradient(ellipse 60% 50% at 80% 90%, rgba(34, 211, 153, 0.06) 0%, transparent 60%),
-                radial-gradient(ellipse 50% 40% at 50% 50%, rgba(34, 211, 238, 0.04) 0%, transparent 60%);
-            pointer-events: none;
-            z-index: 0;
+        /* ─────────────── Keyframe Animations ─────────────── */
+        @keyframes pulseGlow {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(0.72); opacity: 0.45; }
+        }
+
+        @keyframes radarPing {
+            0% { transform: scale(0.85); opacity: 0.95; }
+            70% { transform: scale(2.2); opacity: 0; }
+            100% { transform: scale(2.2); opacity: 0; }
+        }
+
+        @keyframes overlayFadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes modalPopIn {
+            from { opacity: 0; transform: scale(0.94) translateY(12px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        @keyframes alertSlideIn {
+            from { opacity: 0; transform: translateX(18px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        @keyframes detCardPop {
+            from { opacity: 0; transform: scale(0.92); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        @keyframes scanHud {
+            0% { top: 0%; opacity: 0.8; }
+            50% { opacity: 1; }
+            100% { top: 98%; opacity: 0.8; }
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
 
         /* ─────────────── Layout ─────────────── */
@@ -93,9 +124,8 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 16px 28px;
-            background: var(--bg-glass);
-            backdrop-filter: blur(20px) saturate(1.4);
+            padding: 14px 24px;
+            background: var(--bg-secondary);
             border-bottom: 1px solid var(--border-subtle);
             position: sticky;
             top: 0;
@@ -109,34 +139,37 @@
         }
 
         .logo {
-            width: 36px;
-            height: 36px;
+            width: 34px;
+            height: 34px;
             border-radius: var(--radius-sm);
-            background: var(--gradient-hero);
+            background: #0284c7;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 18px;
+            font-size: 16px;
             font-weight: 800;
-            color: var(--bg-primary);
-            box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+            color: #ffffff;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(2, 132, 199, 0.4);
+            transition: transform var(--transition-smooth);
+        }
+        .logo:hover {
+            transform: scale(1.06);
         }
 
         .brand {
-            font-size: 1.3rem;
-            font-weight: 700;
-            letter-spacing: -0.5px;
-            background: var(--gradient-hero);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            font-size: 1.15rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            color: #ffffff;
+            text-transform: uppercase;
         }
 
         .brand-sub {
-            font-size: 0.75rem;
+            font-size: 0.68rem;
             color: var(--text-muted);
-            font-weight: 400;
-            letter-spacing: 2px;
+            font-weight: 600;
+            letter-spacing: 1.5px;
             text-transform: uppercase;
         }
 
@@ -149,21 +182,23 @@
         .connection-badge {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 7px;
             padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 0.75rem;
-            font-weight: 500;
-            background: rgba(34, 211, 153, 0.1);
-            color: var(--accent-emerald);
-            border: 1px solid rgba(34, 211, 153, 0.2);
-            transition: var(--transition);
+            border-radius: var(--radius-full);
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            background: #064e3b;
+            color: #34d399;
+            border: 1px solid #059669;
+            transition: var(--transition-smooth);
         }
 
         .connection-badge.disconnected {
-            background: rgba(251, 113, 133, 0.1);
-            color: var(--accent-rose);
-            border-color: rgba(251, 113, 133, 0.2);
+            background: #7f1d1d;
+            color: #f87171;
+            border-color: #dc2626;
         }
 
         .pulse-dot {
@@ -171,22 +206,17 @@
             height: 7px;
             border-radius: 50%;
             background: currentColor;
-            animation: pulse 2s ease-in-out infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.5; transform: scale(0.8); }
+            animation: pulseGlow 1.8s ease-in-out infinite;
         }
 
         /* ─────────────── Main Content ─────────────── */
         .main {
             display: grid;
-            grid-template-columns: 1fr 400px;
+            grid-template-columns: 1fr 410px;
             grid-template-rows: auto 1fr;
-            gap: 20px;
-            padding: 20px 28px;
-            max-height: calc(100vh - 68px);
+            gap: 16px;
+            padding: 16px 24px;
+            max-height: calc(100vh - 62px);
             overflow: hidden;
         }
 
@@ -194,74 +224,81 @@
         .stats-bar {
             grid-column: 1 / -1;
             display: flex;
-            gap: 16px;
+            gap: 12px;
         }
 
         .stat-card {
             flex: 1;
             background: var(--bg-card);
-            backdrop-filter: blur(12px);
             border: 1px solid var(--border-subtle);
             border-radius: var(--radius-md);
-            padding: 16px 20px;
+            padding: 12px 16px;
             display: flex;
             align-items: center;
-            gap: 14px;
-            transition: var(--transition);
+            gap: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+            transition: transform var(--transition-smooth), background-color 0.2s, border-color 0.2s, box-shadow var(--transition-smooth);
             cursor: default;
         }
 
         .stat-card:hover {
-            border-color: var(--border-glow);
-            box-shadow: var(--shadow-glow);
-            transform: translateY(-2px);
+            transform: translateY(-3px);
+            border-color: var(--border-active);
+            background: #141c2a;
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
         }
 
         .stat-icon {
-            width: 44px;
-            height: 44px;
+            width: 38px;
+            height: 38px;
             border-radius: var(--radius-sm);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 20px;
+            font-size: 18px;
             flex-shrink: 0;
+            background: #182232;
+            border: 1px solid var(--border-subtle);
+            transition: transform var(--transition-smooth);
         }
 
-        .stat-icon.cameras    { background: rgba(129, 140, 248, 0.12); color: var(--accent-indigo); }
-        .stat-icon.alerts     { background: rgba(251, 191, 36, 0.12);  color: var(--accent-amber); }
-        .stat-icon.plates     { background: rgba(34, 211, 238, 0.12);  color: var(--accent-cyan); }
-        .stat-icon.total      { background: rgba(167, 139, 250, 0.12); color: var(--accent-purple); }
+        .stat-card:hover .stat-icon {
+            transform: scale(1.08);
+        }
 
         .stat-info { display: flex; flex-direction: column; }
 
         .stat-value {
-            font-size: 1.5rem;
-            font-weight: 700;
+            font-size: 1.35rem;
+            font-weight: 800;
             line-height: 1.2;
+            font-family: var(--font-mono);
+            color: #ffffff;
             font-variant-numeric: tabular-nums;
         }
 
         .stat-label {
-            font-size: 0.72rem;
+            font-size: 0.68rem;
             color: var(--text-muted);
             text-transform: uppercase;
-            letter-spacing: 1px;
-            font-weight: 500;
+            letter-spacing: 0.8px;
+            font-weight: 600;
         }
 
         /* ─────────────── Map Panel ─────────────── */
         .map-panel {
             background: var(--bg-card);
             border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-lg);
+            border-radius: var(--radius-md);
             overflow: hidden;
             display: flex;
             flex-direction: column;
+            box-shadow: var(--shadow-card);
         }
 
         .panel-header {
-            padding: 14px 18px;
+            padding: 12px 16px;
+            background: var(--bg-panel);
             border-bottom: 1px solid var(--border-subtle);
             display: flex;
             align-items: center;
@@ -269,20 +306,38 @@
         }
 
         .panel-title {
-            font-size: 0.85rem;
-            font-weight: 600;
-            letter-spacing: 0.5px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.8px;
             text-transform: uppercase;
-            color: var(--text-secondary);
+            color: var(--text-primary);
         }
 
         .panel-badge {
             font-size: 0.7rem;
-            padding: 2px 8px;
-            border-radius: 10px;
-            background: rgba(129, 140, 248, 0.15);
-            color: var(--accent-indigo);
-            font-weight: 500;
+            padding: 3px 10px;
+            border-radius: var(--radius-full);
+            background: #1e293b;
+            border: 1px solid var(--border-subtle);
+            color: var(--text-secondary);
+            font-weight: 600;
+            font-family: var(--font-mono);
+        }
+
+        .quick-cam-select {
+            padding: 4px 10px;
+            border-radius: var(--radius-sm);
+            background: #090d14;
+            border: 1px solid var(--border-subtle);
+            color: var(--text-primary);
+            font-size: 0.72rem;
+            font-family: var(--font-sans);
+            outline: none;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+        .quick-cam-select:hover, .quick-cam-select:focus {
+            border-color: var(--border-focus);
         }
 
         #map {
@@ -290,67 +345,128 @@
             min-height: 300px;
         }
 
-        /* Leaflet overrides for dark theme */
+        /* Leaflet overrides */
         .leaflet-container { background: var(--bg-primary) !important; }
         .leaflet-control-zoom a {
             background: var(--bg-secondary) !important;
             color: var(--text-primary) !important;
             border-color: var(--border-subtle) !important;
+            border-radius: var(--radius-xs) !important;
+            transition: background-color 0.15s ease;
         }
         .leaflet-control-zoom a:hover {
             background: var(--bg-card) !important;
         }
 
+        /* Map marker styling */
+        .camera-marker-pin {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #000000;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+            position: relative;
+            cursor: pointer;
+            transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .camera-marker-pin:hover {
+            transform: scale(1.22);
+        }
+        .camera-marker-radar {
+            position: absolute;
+            inset: -7px;
+            border-radius: 50%;
+            border: 2px solid #00e5ff;
+            animation: radarPing 1.8s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+            pointer-events: none;
+        }
+
         /* Custom map popup */
         .leaflet-popup-content-wrapper {
             background: var(--bg-secondary) !important;
-            border: 1px solid var(--border-subtle) !important;
+            border: 1px solid var(--border-active) !important;
             border-radius: var(--radius-md) !important;
-            box-shadow: var(--shadow-card) !important;
+            box-shadow: var(--shadow-modal) !important;
             color: var(--text-primary) !important;
         }
         .leaflet-popup-tip { background: var(--bg-secondary) !important; }
         .leaflet-popup-close-button { color: var(--text-muted) !important; }
 
         .popup-title {
-            font-weight: 600;
-            font-size: 0.9rem;
-            margin-bottom: 4px;
+            font-weight: 700;
+            font-size: 0.88rem;
+            margin-bottom: 2px;
+            color: #ffffff;
         }
         .popup-id {
             font-family: var(--font-mono);
-            font-size: 0.7rem;
+            font-size: 0.68rem;
             color: var(--text-muted);
             margin-bottom: 8px;
         }
         .popup-status {
             display: inline-block;
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 0.7rem;
-            font-weight: 600;
+            padding: 3px 8px;
+            border-radius: var(--radius-full);
+            font-size: 0.68rem;
+            font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.5px;
+            font-family: var(--font-mono);
         }
-        .popup-status.streaming   { background: rgba(34,211,153,0.15); color: var(--accent-emerald); }
-        .popup-status.connected   { background: rgba(96,165,250,0.15); color: var(--accent-blue); }
-        .popup-status.reconnecting { background: rgba(251,191,36,0.15); color: var(--accent-amber); }
-        .popup-status.unknown     { background: rgba(100,116,139,0.15); color: var(--text-muted); }
-        .popup-status.offline     { background: rgba(251,113,133,0.15); color: var(--accent-rose); }
+        .popup-status.extracting  { background: #083344; color: var(--accent-cyan); border: 1px solid #06b6d4; }
+        .popup-status.idle        { background: #1e293b; color: #94a3b8; border: 1px solid var(--border-subtle); }
+        .popup-status.streaming   { background: #064e3b; color: #34d399; border: 1px solid #059669; }
+        .popup-status.connected   { background: #1e3a8a; color: #60a5fa; border: 1px solid #2563eb; }
+        .popup-status.reconnecting { background: #78350f; color: #fbbf24; border: 1px solid #d97706; }
+        .popup-status.unknown     { background: #334155; color: var(--text-muted); }
+        .popup-status.offline     { background: #7f1d1d; color: var(--accent-rose); border: 1px solid #dc2626; }
+
+        .popup-stream-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 10px;
+            padding: 7px 14px;
+            border: 1px solid #0284c7;
+            border-radius: var(--radius-sm);
+            background: #0369a1;
+            color: #ffffff;
+            font-family: var(--font-sans);
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: transform var(--transition-smooth), background-color 0.15s;
+            text-decoration: none;
+        }
+        .popup-stream-btn:hover {
+            background: #0284c7;
+            transform: translateY(-1px);
+        }
+        .popup-stream-btn:active {
+            transform: translateY(1px);
+        }
 
         /* ─────────────── Alerts Panel ─────────────── */
         .alerts-panel {
             background: var(--bg-card);
             border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-lg);
+            border-radius: var(--radius-md);
             overflow: hidden;
             display: flex;
             flex-direction: column;
             max-height: 100%;
+            box-shadow: var(--shadow-card);
         }
 
         .search-bar {
-            padding: 12px 16px;
+            padding: 10px 14px;
+            background: var(--bg-panel);
             border-bottom: 1px solid var(--border-subtle);
         }
 
@@ -359,17 +475,17 @@
             padding: 8px 14px;
             border-radius: var(--radius-sm);
             border: 1px solid var(--border-subtle);
-            background: rgba(255,255,255,0.03);
+            background: #090d14;
             color: var(--text-primary);
             font-family: var(--font-mono);
             font-size: 0.8rem;
             outline: none;
-            transition: var(--transition);
+            transition: border-color 0.2s, box-shadow 0.2s;
         }
         .search-input::placeholder { color: var(--text-muted); }
         .search-input:focus {
-            border-color: var(--accent-indigo);
-            box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.1);
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.25);
         }
 
         .alerts-list {
@@ -378,40 +494,33 @@
             padding: 8px;
         }
 
-        /* Custom scrollbar */
         .alerts-list::-webkit-scrollbar { width: 5px; }
         .alerts-list::-webkit-scrollbar-track { background: transparent; }
         .alerts-list::-webkit-scrollbar-thumb {
-            background: var(--border-subtle);
-            border-radius: 3px;
-        }
-        .alerts-list::-webkit-scrollbar-thumb:hover {
-            background: rgba(255,255,255,0.12);
+            background: var(--border-active);
+            border-radius: var(--radius-full);
         }
 
         .alert-card {
-            padding: 12px 14px;
+            padding: 10px 14px;
             border-radius: var(--radius-sm);
-            border: 1px solid transparent;
-            margin-bottom: 6px;
-            transition: var(--transition);
-            cursor: default;
-            animation: slideIn 0.3s ease-out;
-        }
-
-        @keyframes slideIn {
-            from { opacity: 0; transform: translateX(20px); }
-            to { opacity: 1; transform: translateX(0); }
+            border: 1px solid var(--border-subtle);
+            background: #0d121c;
+            margin-bottom: 7px;
+            transition: transform var(--transition-smooth), background-color 0.2s, border-color 0.2s;
+            cursor: pointer;
         }
 
         .alert-card:hover {
-            background: rgba(255,255,255,0.03);
-            border-color: var(--border-subtle);
+            background: #141c2a;
+            border-color: var(--border-active);
+            transform: translateX(4px);
         }
 
         .alert-card.new-alert {
             border-left: 3px solid var(--accent-cyan);
-            background: rgba(34, 211, 238, 0.04);
+            background: #0e1724;
+            animation: alertSlideIn 0.35s var(--transition-smooth) forwards;
         }
 
         .alert-top {
@@ -424,24 +533,25 @@
         .alert-plate {
             font-family: var(--font-mono);
             font-size: 1rem;
-            font-weight: 700;
+            font-weight: 800;
             letter-spacing: 1.5px;
-            color: var(--accent-cyan);
+            color: #ffffff;
         }
 
         .alert-confidence {
-            font-size: 0.7rem;
-            padding: 2px 6px;
-            border-radius: 6px;
-            font-weight: 600;
+            font-size: 0.68rem;
+            padding: 2px 8px;
+            border-radius: var(--radius-full);
+            font-weight: 700;
+            font-family: var(--font-mono);
         }
 
-        .conf-high   { background: rgba(34,211,153,0.12); color: var(--accent-emerald); }
-        .conf-medium { background: rgba(251,191,36,0.12);  color: var(--accent-amber); }
-        .conf-low    { background: rgba(251,113,133,0.12);  color: var(--accent-rose); }
+        .conf-high   { background: #064e3b; color: #6ee7b7; border: 1px solid #059669; }
+        .conf-medium { background: #78350f; color: #fcd34d; border: 1px solid #d97706; }
+        .conf-low    { background: #7f1d1d; color: #fca5a5; border: 1px solid #dc2626; }
 
         .alert-camera {
-            font-size: 0.75rem;
+            font-size: 0.72rem;
             color: var(--text-secondary);
             white-space: nowrap;
             overflow: hidden;
@@ -449,7 +559,7 @@
         }
 
         .alert-time {
-            font-size: 0.68rem;
+            font-size: 0.66rem;
             color: var(--text-muted);
             font-family: var(--font-mono);
         }
@@ -465,20 +575,381 @@
         }
 
         .empty-icon {
-            font-size: 48px;
-            margin-bottom: 12px;
-            opacity: 0.4;
+            font-size: 40px;
+            margin-bottom: 10px;
+            opacity: 0.35;
         }
 
         .empty-title {
-            font-weight: 600;
-            font-size: 0.95rem;
+            font-weight: 700;
+            font-size: 0.9rem;
             color: var(--text-secondary);
             margin-bottom: 4px;
         }
 
         .empty-desc {
-            font-size: 0.78rem;
+            font-size: 0.75rem;
+        }
+
+        /* ─────────────── Live Stream Modal ─────────────── */
+        .stream-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(4px);
+            align-items: center;
+            justify-content: center;
+        }
+
+        .stream-overlay.active {
+            display: flex;
+            animation: overlayFadeIn 0.22s var(--transition-smooth) forwards;
+        }
+
+        .stream-modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-active);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-modal);
+            width: 90vw;
+            max-width: 880px;
+            overflow: hidden;
+        }
+
+        .stream-overlay.active .stream-modal {
+            animation: modalPopIn 0.26s var(--transition-smooth) forwards;
+        }
+
+        .stream-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 20px;
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .stream-modal-title {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+        }
+
+        .stream-modal-title h3 {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #ffffff;
+        }
+
+        .stream-modal-title span {
+            font-family: var(--font-mono);
+            font-size: 0.68rem;
+            color: var(--text-muted);
+        }
+
+        /* Dynamic On-Demand Extraction Toggle Button */
+        .extract-toggle-btn {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            padding: 6px 14px;
+            border-radius: var(--radius-full);
+            background: #0284c7;
+            border: 1px solid #38bdf8;
+            color: #ffffff;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: transform var(--transition-smooth), background-color 0.15s;
+        }
+        .extract-toggle-btn:hover {
+            background: #0369a1;
+            transform: translateY(-1px);
+        }
+        .extract-toggle-btn:active {
+            transform: translateY(1px);
+        }
+        .extract-toggle-btn.idle {
+            background: #1e293b;
+            border-color: #334155;
+            color: #94a3b8;
+        }
+        .extract-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #ffffff;
+            animation: pulseGlow 1.5s ease-in-out infinite;
+        }
+        .extract-toggle-btn.idle .extract-dot {
+            background: #64748b;
+            animation: none;
+        }
+
+        .stream-live-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 10px;
+            border-radius: var(--radius-full);
+            background: #7f1d1d;
+            border: 1px solid #dc2626;
+            color: #fca5a5;
+            font-size: 0.68rem;
+            font-weight: 700;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+            font-family: var(--font-mono);
+        }
+
+        .stream-close-btn {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--border-subtle);
+            border-radius: 50%;
+            background: #111723;
+            color: var(--text-secondary);
+            font-size: 15px;
+            cursor: pointer;
+            transition: transform var(--transition-smooth), background-color 0.15s, color 0.15s;
+        }
+
+        .stream-close-btn:hover {
+            background: #7f1d1d;
+            color: #ffffff;
+            border-color: #dc2626;
+            transform: scale(1.1);
+        }
+        .stream-close-btn:active {
+            transform: scale(0.95);
+        }
+
+        .stream-body {
+            position: relative;
+            background: #05070a;
+            min-height: 280px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 12px 18px;
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            border: 1px solid var(--border-subtle);
+        }
+
+        .hud-scanline {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: #00e5ff;
+            box-shadow: 0 0 10px #00e5ff;
+            opacity: 0.85;
+            pointer-events: none;
+            z-index: 10;
+            animation: scanHud 2.5s ease-in-out infinite alternate;
+        }
+
+        .stream-body img {
+            width: 100%;
+            max-height: 48vh;
+            object-fit: contain;
+            display: block;
+        }
+
+        .stream-loading {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            color: var(--text-muted);
+            font-size: 0.82rem;
+            font-family: var(--font-mono);
+        }
+
+        .stream-spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid #1e293b;
+            border-top-color: var(--accent-cyan);
+            border-radius: 50%;
+            animation: spin 0.85s cubic-bezier(0.4, 0.1, 0.4, 1) infinite;
+        }
+
+        .stream-loading.hidden { display: none; }
+
+        /* In-Modal Real-Time Camera Detections */
+        .camera-detections-section {
+            background: #090d14;
+            border-top: 1px solid var(--border-subtle);
+            padding: 12px 18px;
+            max-height: 165px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .cam-det-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .cam-det-title {
+            font-size: 0.74rem;
+            font-weight: 700;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .cam-det-count {
+            font-size: 0.68rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: var(--radius-full);
+            background: #1e293b;
+            border: 1px solid var(--border-subtle);
+            color: var(--accent-cyan);
+            font-family: var(--font-mono);
+        }
+        .cam-det-list {
+            display: flex;
+            gap: 10px;
+            overflow-x: auto;
+            padding-bottom: 6px;
+        }
+        .cam-det-list::-webkit-scrollbar {
+            height: 4px;
+        }
+        .cam-det-list::-webkit-scrollbar-thumb {
+            background: var(--border-active);
+            border-radius: var(--radius-full);
+        }
+        .cam-det-card {
+            flex: 0 0 auto;
+            background: #111723;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            padding: 9px 13px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 175px;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+            animation: detCardPop 0.28s var(--transition-smooth) forwards;
+            transition: transform var(--transition-smooth), border-color 0.2s, background-color 0.2s;
+        }
+        .cam-det-card:hover {
+            border-color: var(--border-active);
+            background: #161e2e;
+            transform: translateY(-2px);
+        }
+        .cam-det-plate {
+            font-family: var(--font-mono);
+            font-size: 1rem;
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            color: #ffffff;
+        }
+        .cam-det-meta {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.7rem;
+        }
+        .cam-det-empty {
+            color: var(--text-muted);
+            font-size: 0.74rem;
+            padding: 12px 0;
+            text-align: center;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-family: var(--font-mono);
+        }
+
+        .stream-footer {
+            padding: 9px 18px;
+            border-top: 1px solid var(--border-subtle);
+            background: var(--bg-panel);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+        }
+
+        /* ─────────────── Detail View Modal ─────────────── */
+        .detail-body {
+            padding: 20px;
+            background: var(--bg-secondary);
+        }
+
+        .detail-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+
+        .detail-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+        }
+
+        .detail-value {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .detail-plate-lg {
+            font-family: var(--font-mono);
+            font-size: 1.7rem;
+            font-weight: 800;
+            letter-spacing: 2px;
+            color: #ffffff;
+            text-align: center;
+            margin-bottom: 16px;
+            padding: 14px;
+            background: #090d14;
+            border: 1px solid var(--border-active);
+            border-radius: var(--radius-md);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+        }
+
+        .vehicle-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: var(--radius-full);
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: #182232;
+            border: 1px solid var(--border-subtle);
         }
 
         /* ─────────────── Responsive ─────────────── */
@@ -493,257 +964,8 @@
 
         @media (max-width: 640px) {
             .stats-bar { flex-direction: column; }
-            .header { padding: 12px 16px; }
-            .main { padding: 12px 16px; }
-        }
-
-        /* ─────────────── Live Stream Modal ─────────────── */
-        .stream-overlay {
-            display: none;
-            position: fixed;
-            inset: 0;
-            z-index: 9999;
-            background: rgba(0, 0, 0, 0.75);
-            backdrop-filter: blur(8px);
-            align-items: center;
-            justify-content: center;
-            animation: fadeIn 0.2s ease-out;
-        }
-
-        .stream-overlay.active {
-            display: flex;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-
-        .stream-modal {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-xl);
-            box-shadow: 0 8px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--border-subtle);
-            width: 90vw;
-            max-width: 900px;
-            overflow: hidden;
-            animation: scaleIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-
-        @keyframes scaleIn {
-            from { opacity: 0; transform: scale(0.92); }
-            to { opacity: 1; transform: scale(1); }
-        }
-
-        .stream-modal-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 16px 20px;
-            border-bottom: 1px solid var(--border-subtle);
-        }
-
-        .stream-modal-title {
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-        }
-
-        .stream-modal-title h3 {
-            font-size: 1rem;
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-
-        .stream-modal-title span {
-            font-family: var(--font-mono);
-            font-size: 0.72rem;
-            color: var(--text-muted);
-        }
-
-        .stream-live-badge {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            padding: 4px 10px;
-            border-radius: 12px;
-            background: rgba(251, 113, 133, 0.12);
-            color: var(--accent-rose);
-            font-size: 0.7rem;
-            font-weight: 700;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-        }
-
-        .stream-live-badge .pulse-dot {
-            background: var(--accent-rose);
-        }
-
-        .stream-close-btn {
-            width: 34px;
-            height: 34px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-sm);
-            background: transparent;
-            color: var(--text-secondary);
-            font-size: 18px;
-            cursor: pointer;
-            transition: var(--transition);
-        }
-
-        .stream-close-btn:hover {
-            background: rgba(251, 113, 133, 0.12);
-            color: var(--accent-rose);
-            border-color: rgba(251, 113, 133, 0.3);
-        }
-
-        .stream-body {
-            position: relative;
-            background: #000;
-            min-height: 300px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .stream-body img {
-            width: 100%;
-            max-height: 70vh;
-            object-fit: contain;
-            display: block;
-        }
-
-        .stream-loading {
-            position: absolute;
-            inset: 0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 12px;
-            color: var(--text-muted);
-            font-size: 0.85rem;
-        }
-
-        .stream-spinner {
-            width: 32px;
-            height: 32px;
-            border: 3px solid var(--border-subtle);
-            border-top-color: var(--accent-indigo);
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .stream-loading.hidden { display: none; }
-
-        .stream-footer {
-            padding: 10px 20px;
-            border-top: 1px solid var(--border-subtle);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            font-size: 0.72rem;
-            color: var(--text-muted);
-        }
-
-        .stream-footer .stream-fps {
-            font-family: var(--font-mono);
-        }
-
-        /* Popup live feed button */
-        .popup-stream-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            margin-top: 8px;
-            padding: 5px 10px;
-            border: 1px solid rgba(129, 140, 248, 0.3);
-            border-radius: 6px;
-            background: rgba(129, 140, 248, 0.1);
-            color: var(--accent-indigo);
-            font-family: var(--font-sans);
-            font-size: 0.72rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: var(--transition);
-            text-decoration: none;
-        }
-
-        .popup-stream-btn:hover {
-            background: rgba(129, 140, 248, 0.2);
-            border-color: rgba(129, 140, 248, 0.5);
-            transform: translateY(-1px);
-        }
-
-        /* ─────────────── Detail Modal ─────────────── */
-        .detail-body {
-            padding: 24px;
-        }
-
-        .detail-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 12px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-        }
-        .detail-row:last-child {
-            border-bottom: none;
-        }
-
-        .detail-label {
-            font-size: 0.8rem;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            font-weight: 500;
-        }
-
-        .detail-value {
-            font-size: 0.95rem;
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-        
-        .detail-plate-lg {
-            font-family: var(--font-mono);
-            font-size: 1.8rem;
-            font-weight: 800;
-            letter-spacing: 2px;
-            color: var(--accent-cyan);
-            text-align: center;
-            margin-bottom: 20px;
-            padding: 16px;
-            background: rgba(34, 211, 238, 0.05);
-            border: 1px solid rgba(34, 211, 238, 0.2);
-            border-radius: var(--radius-md);
-            text-shadow: 0 0 20px rgba(34, 211, 238, 0.4);
-        }
-
-        .vehicle-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 4px 10px;
-            border-radius: 6px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            background: rgba(255,255,255,0.05);
-            border: 1px solid rgba(255,255,255,0.1);
-        }
-
-        .alert-card-clickable {
-            cursor: pointer;
-        }
-        .alert-card-clickable:hover {
-            box-shadow: 0 0 15px rgba(34, 211, 238, 0.1);
+            .header { padding: 10px 14px; }
+            .main { padding: 10px 14px; }
         }
     </style>
 </head>
@@ -771,28 +993,35 @@
             <!-- Stats Bar -->
             <div class="stats-bar">
                 <div class="stat-card">
-                    <div class="stat-icon cameras">📷</div>
+                    <div class="stat-icon">📷</div>
                     <div class="stat-info">
                         <span class="stat-value" id="stat-cameras">—</span>
-                        <span class="stat-label">Cameras Online</span>
+                        <span class="stat-label">Cameras Configured</span>
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-icon alerts">⚡</div>
+                    <div class="stat-icon" style="color: var(--accent-cyan);">⚡</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="stat-extractions">0 / 2</span>
+                        <span class="stat-label">Active Extractions</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="color: var(--accent-amber);">🚨</div>
                     <div class="stat-info">
                         <span class="stat-value" id="stat-alerts-today">—</span>
                         <span class="stat-label">Alerts Today</span>
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-icon plates">🔍</div>
+                    <div class="stat-icon" style="color: var(--accent-blue);">🔍</div>
                     <div class="stat-info">
                         <span class="stat-value" id="stat-plates">—</span>
                         <span class="stat-label">Unique Plates</span>
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-icon total">📊</div>
+                    <div class="stat-icon" style="color: var(--accent-emerald);">📊</div>
                     <div class="stat-info">
                         <span class="stat-value" id="stat-total">—</span>
                         <span class="stat-label">Total Detections</span>
@@ -803,7 +1032,12 @@
             <!-- Map -->
             <div class="map-panel">
                 <div class="panel-header">
-                    <span class="panel-title">📍 Live Camera Map</span>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span class="panel-title">Live Camera Map</span>
+                        <select id="quick-cam-select" class="quick-cam-select" onchange="onQuickSelectCamera(this)" title="Choose camera to stream and extract">
+                            <option value="">⚡ Quick Select Camera...</option>
+                        </select>
+                    </div>
                     <span class="panel-badge" id="camera-count-badge">0 cameras</span>
                 </div>
                 <div id="map"></div>
@@ -812,15 +1046,15 @@
             <!-- Alerts Feed -->
             <div class="alerts-panel">
                 <div class="panel-header">
-                    <span class="panel-title">🚨 Alert Feed</span>
-                    <span class="panel-badge" id="alert-live-badge">LIVE</span>
+                    <span class="panel-title">Alert Feed</span>
+                    <span class="panel-badge" id="alert-live-badge" style="color: #34d399; background: #064e3b; border-color: #059669;">LIVE</span>
                 </div>
                 <div class="search-bar">
                     <input
                         type="text"
                         class="search-input"
                         id="plate-search"
-                        placeholder="Search plate number..."
+                        placeholder="Search plate number (e.g. GJ01)..."
                     >
                 </div>
                 <div class="alerts-list" id="alerts-list">
@@ -842,6 +1076,10 @@
                         <span id="stream-cam-id">—</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
+                        <button class="extract-toggle-btn" id="modal-extract-toggle" onclick="toggleExtraction()" title="Toggle On-Demand AI Extraction">
+                            <span class="extract-dot"></span>
+                            <span id="modal-extract-text">AI Extracting</span>
+                        </button>
                         <div class="stream-live-badge">
                             <span class="pulse-dot"></span>
                             LIVE
@@ -850,22 +1088,35 @@
                     </div>
                 </div>
                 <div class="stream-body">
+                    <div class="hud-scanline" id="stream-scanline" style="display: none;"></div>
                     <div class="stream-loading" id="stream-loading">
                         <div class="stream-spinner"></div>
                         Connecting to camera feed…
                     </div>
                     <img id="stream-img" alt="Live feed" style="display: none;">
                 </div>
+                <!-- In-Modal Real-Time Camera Detections -->
+                <div class="camera-detections-section">
+                    <div class="cam-det-header">
+                        <span class="cam-det-title">Live Extracted Plates (This Camera)</span>
+                        <span class="cam-det-count" id="modal-det-count">0 detections</span>
+                    </div>
+                    <div class="cam-det-list" id="modal-det-list">
+                        <div class="cam-det-empty">
+                            <span>📡</span> Scanning video stream for vehicles and plates...
+                        </div>
+                    </div>
+                </div>
                 <div class="stream-footer">
-                    <span>MJPEG Stream · ~<span class="stream-fps">10</span> FPS</span>
-                    <span>Press <kbd style="padding: 1px 5px; border: 1px solid var(--border-subtle); border-radius: 4px; font-family: var(--font-mono);">Esc</kbd> to close</span>
+                    <span>MJPEG Stream · ~<span class="stream-fps">10</span> FPS · Dynamic On-Demand Extraction</span>
+                    <span>Press <kbd style="padding: 1px 4px; border: 1px solid var(--border-subtle); border-radius: 2px; font-family: var(--font-mono);">Esc</kbd> to close</span>
                 </div>
             </div>
         </div>
 
         <!-- ─────── Detail View Modal ─────── -->
         <div class="stream-overlay" id="detail-overlay" onclick="closeDetailModal(event)">
-            <div class="stream-modal" style="max-width: 500px;" onclick="event.stopPropagation()">
+            <div class="stream-modal" style="max-width: 480px;" onclick="event.stopPropagation()">
                 <div class="stream-modal-header">
                     <div class="stream-modal-title">
                         <h3>Detection Details</h3>
@@ -880,19 +1131,19 @@
                         <span class="detail-value alert-confidence" id="detail-conf">98%</span>
                     </div>
                     <div class="detail-row">
-                        <span class="detail-label">Time</span>
-                        <span class="detail-value" id="detail-time" style="font-family: var(--font-mono); font-size: 0.85rem;">—</span>
+                        <span class="detail-label">Timestamp</span>
+                        <span class="detail-value" id="detail-time" style="font-family: var(--font-mono); font-size: 0.8rem;">—</span>
                     </div>
                     <div class="detail-row">
                         <span class="detail-label">Location</span>
                         <div style="text-align: right;">
                             <div class="detail-value" id="detail-area">—</div>
-                            <div style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted);" id="detail-cam">—</div>
+                            <div style="font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted);" id="detail-cam">—</div>
                         </div>
                     </div>
                     <div class="detail-row">
-                        <span class="detail-label">Vehicle Data</span>
-                        <div style="display: flex; gap: 8px;">
+                        <span class="detail-label">Vehicle Profile</span>
+                        <div style="display: flex; gap: 6px;">
                             <span class="vehicle-badge" id="detail-vtype">🚘 Unknown</span>
                             <span class="vehicle-badge" id="detail-vcolor">⚪ Unknown</span>
                         </div>
@@ -912,7 +1163,7 @@
 
     const API_BASE = '';  // same origin
     const WS_URL = `ws://${location.host}/ws/alerts`;
-    const POLL_INTERVAL_MS = 10000;  // REST poll fallback: 10s
+    const POLL_INTERVAL_MS = 10000;
     const MAX_ALERTS_DISPLAY = 200;
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -921,6 +1172,9 @@
 
     let map, cameraMarkers = {}, alertsList = [];
     let ws = null, wsRetries = 0;
+    let currentModalCameraId = null;
+    let currentModalExtracting = true;
+    let modalDetections = [];
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // Map initialization
@@ -930,53 +1184,79 @@
         map = L.map('map', {
             zoomControl: true,
             attributionControl: false,
-        }).setView([23.025, 72.55], 13);  // Ahmedabad default center
+        }).setView([23.025, 72.55], 13);
 
-        // Dark tile layer
+        // Dark clean tactical tile layer
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
             maxZoom: 19,
         }).addTo(map);
     }
 
+    // Solid-color, ergonomic rounded camera pins with radar pulse animation
     function createCameraIcon(status) {
         const colors = {
-            streaming: '#34d399',
-            connected: '#60a5fa',
-            reconnecting: '#fbbf24',
-            unknown: '#64748b',
-            offline: '#fb7185',
+            extracting:   '#00e5ff',
+            streaming:    '#10b981',
+            connected:    '#38bdf8',
+            reconnecting: '#f59e0b',
+            idle:         '#64748b',
+            unknown:      '#475569',
+            offline:      '#ef4444',
         };
-        const color = colors[status] || colors.unknown;
+        const color = colors[status] || colors.idle;
+        const isExtracting = (status === 'extracting');
 
         return L.divIcon({
             className: 'camera-marker',
             html: `
-                <div style="
-                    width: 28px; height: 28px;
-                    background: ${color};
-                    border: 3px solid rgba(0,0,0,0.5);
-                    border-radius: 50%;
-                    box-shadow: 0 0 12px ${color}80, 0 0 24px ${color}40;
-                    display: flex; align-items: center; justify-content: center;
-                    font-size: 12px;
-                    transition: all 0.3s ease;
-                ">📷</div>
+                <div class="camera-marker-pin" style="background: ${color}; border-color: ${isExtracting ? '#ffffff' : '#080b11'};">
+                    ${isExtracting ? '<div class="camera-marker-radar"></div>' : ''}
+                    <span style="color: ${isExtracting ? '#000000' : '#ffffff'}; font-size: ${isExtracting ? '13px' : '11px'}; font-weight: 800; position: relative; z-index: 2;">
+                        ${isExtracting ? '⚡' : '📷'}
+                    </span>
+                </div>
             `,
-            iconSize: [28, 28],
-            iconAnchor: [14, 14],
+            iconSize: [32, 32],
+            iconAnchor: [16, 16],
+            popupAnchor: [0, -16],
         });
     }
 
+    function onQuickSelectCamera(selectEl) {
+        const camId = selectEl.value;
+        if (!camId) return;
+        const rawText = selectEl.options[selectEl.selectedIndex].text;
+        const camName = rawText.includes('—') ? rawText.split('—')[1].trim() : rawText;
+        openStreamModal(camId, camName);
+        if (cameraMarkers[camId]) {
+            map.flyTo(cameraMarkers[camId].getLatLng(), 15, { duration: 0.6 });
+        }
+        selectEl.value = "";
+    }
+
     function updateCameraMarkers(cameras) {
+        const select = document.getElementById('quick-cam-select');
+        if (select && select.options.length <= 1 && cameras.length > 0) {
+            cameras.forEach(cam => {
+                const opt = document.createElement('option');
+                opt.value = cam.camera_id;
+                opt.textContent = `${cam.camera_id} — ${cam.camera_name || 'Camera'}`;
+                select.appendChild(opt);
+            });
+        }
+
         cameras.forEach(cam => {
             if (!cam.latitude || !cam.longitude) return;
 
+            const isExtracting = (cam.status === 'extracting');
             const popupHtml = `
                 <div class="popup-title">${cam.camera_name || 'Unnamed Camera'}</div>
                 <div class="popup-id">${cam.camera_id}</div>
-                <span class="popup-status ${cam.status || 'unknown'}">${cam.status || 'unknown'}</span>
+                <span class="popup-status ${isExtracting ? 'extracting' : (cam.status || 'idle')}">
+                    ${isExtracting ? '⚡ AI EXTRACTING' : (cam.status || 'IDLE')}
+                </span>
                 <br>
-                <button class="popup-stream-btn" onclick="openStreamModal('${cam.camera_id}', '${(cam.camera_name || 'Camera').replace(/'/g, "\\'")}')">▶ View Live Feed</button>
+                <button class="popup-stream-btn" onclick="openStreamModal('${cam.camera_id}', '${(cam.camera_name || 'Camera').replace(/'/g, "\\'")}')">▶ View Live Feed & Extract</button>
             `;
 
             if (cameraMarkers[cam.camera_id]) {
@@ -993,7 +1273,7 @@
         });
 
         document.getElementById('camera-count-badge').textContent =
-            `${cameras.length} camera${cameras.length !== 1 ? 's' : ''}`;
+            `${cameras.length} cameras`;
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1020,7 +1300,7 @@
         const conf = alert.confidence != null ? (alert.confidence * 100).toFixed(0) + '%' : '—';
         const alertJson = encodeURIComponent(JSON.stringify(alert));
         return `
-            <div class="alert-card alert-card-clickable ${isNew ? 'new-alert' : ''}" onclick="openDetailModal('${alertJson}')">
+            <div class="alert-card ${isNew ? 'new-alert' : ''}" onclick="openDetailModal('${alertJson}')">
                 <div class="alert-top">
                     <span class="alert-plate">${alert.plate_number || '???'}</span>
                     <span class="alert-confidence ${confidenceClass(alert.confidence || 0)}">${conf}</span>
@@ -1036,9 +1316,7 @@
         const searchValue = document.getElementById('plate-search').value.toUpperCase();
 
         if (prepend && alerts.length > 0) {
-            // Prepend new alerts
             alerts.forEach(a => alertsList.unshift(a));
-            // Cap length
             if (alertsList.length > MAX_ALERTS_DISPLAY) {
                 alertsList = alertsList.slice(0, MAX_ALERTS_DISPLAY);
             }
@@ -1046,7 +1324,6 @@
             alertsList = alerts;
         }
 
-        // For live updates we just do client-side filtering if search is active
         const filtered = searchValue
             ? alertsList.filter(a => (a.plate_number || '').toUpperCase().includes(searchValue))
             : alertsList;
@@ -1075,6 +1352,10 @@
             const data = await res.json();
 
             document.getElementById('stat-cameras').textContent = data.total_cameras || 0;
+            const extEl = document.getElementById('stat-extractions');
+            if (extEl) {
+                extEl.textContent = `${data.active_extractions_count || 0} / ${data.max_extractions_allowed || 2}`;
+            }
             document.getElementById('stat-alerts-today').textContent = data.alerts_today || 0;
             document.getElementById('stat-plates').textContent = data.unique_plates_today || 0;
             document.getElementById('stat-total').textContent = data.total_alerts || 0;
@@ -1104,7 +1385,7 @@
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // WebSocket — real-time alert stream
+    // WebSocket — Real-Time Alert Stream
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     function connectWebSocket() {
@@ -1130,7 +1411,17 @@
                 const data = JSON.parse(event.data);
                 if (data.type === 'new_alerts' && data.alerts) {
                     renderAlerts(data.alerts, true);
-                    fetchStats();  // refresh stats on new alerts
+                    fetchStats();
+
+                    // If modal is open for a camera, route matching detection to modal feed
+                    if (currentModalCameraId) {
+                        const matching = data.alerts.filter(a => a.camera_id === currentModalCameraId);
+                        if (matching.length > 0) {
+                            matching.forEach(a => modalDetections.unshift(a));
+                            if (modalDetections.length > 30) modalDetections = modalDetections.slice(0, 30);
+                            renderModalDetections();
+                        }
+                    }
                 }
             } catch (e) {
                 console.warn('WS message parse error:', e);
@@ -1150,7 +1441,6 @@
             statusText.textContent = 'Error';
         };
 
-        // Keep-alive ping every 30s
         setInterval(() => {
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send('ping');
@@ -1169,12 +1459,10 @@
         const query = e.target.value.trim();
 
         if (query.length === 0) {
-            // Reset to live alerts feed immediately
             fetchAlerts();
             return;
         }
 
-        // Debounce search
         searchDebounceTimeout = setTimeout(async () => {
             try {
                 const res = await fetch(`${API_BASE}/api/alerts/search?plate=${encodeURIComponent(query)}`);
@@ -1185,7 +1473,7 @@
                     container.innerHTML = `
                         <div class="empty-state">
                             <div class="empty-icon">🔎</div>
-                            <div class="empty-title">No detections found for "${query}"</div>
+                            <div class="empty-title">No detections for "${query}"</div>
                             <div class="empty-desc">Try a different plate number or partial match</div>
                         </div>
                     `;
@@ -1195,84 +1483,198 @@
             } catch (e) {
                 console.error("Search failed:", e);
             }
-        }, 300);
+        }, 250);
     });
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // Init
+    // Live Stream Modal & Dynamic On-Demand Extraction
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    document.addEventListener('DOMContentLoaded', () => {
-        initMap();
-        fetchStats();
-        fetchCameras();
-        fetchAlerts();
-        connectWebSocket();
+    async function openStreamModal(cameraId, cameraName) {
+        currentModalCameraId = cameraId;
+        currentModalExtracting = true;
+        modalDetections = [];
 
-        // Periodic refresh (fallback for non-WS updates like camera status)
-        setInterval(() => {
-            fetchStats();
-            fetchCameras();
-        }, POLL_INTERVAL_MS);
-    });
-
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // Live Stream Modal
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-    function openStreamModal(cameraId, cameraName) {
         const overlay = document.getElementById('stream-overlay');
         const img = document.getElementById('stream-img');
         const loading = document.getElementById('stream-loading');
+        const toggleBtn = document.getElementById('modal-extract-toggle');
+        const toggleText = document.getElementById('modal-extract-text');
+        const detList = document.getElementById('modal-det-list');
+        const detCount = document.getElementById('modal-det-count');
+        const scanline = document.getElementById('stream-scanline');
 
         document.getElementById('stream-cam-name').textContent = cameraName || 'Camera Feed';
         document.getElementById('stream-cam-id').textContent = cameraId;
 
-        // Show loading, hide image
-        loading.classList.remove('hidden');
-        img.style.display = 'none';
-        img.src = '';
+        if (toggleBtn) toggleBtn.className = 'extract-toggle-btn';
+        if (toggleText) toggleText.textContent = 'AI Extracting';
+        if (detCount) detCount.textContent = '0 detections';
+        if (detList) detList.innerHTML = '<div class="cam-det-empty"><span>📡</span> Scanning video stream for vehicles and plates...</div>';
+        if (scanline) scanline.style.display = 'block';
 
-        // Open the modal
         overlay.classList.add('active');
 
-        // Set the MJPEG stream source — the browser natively handles
-        // multipart/x-mixed-replace and updates the <img> continuously
+        // Reset previous image handlers
         img.onload = function() {
-            // First frame arrived — hide spinner, show video
             loading.classList.add('hidden');
             img.style.display = 'block';
         };
         img.onerror = function() {
-            loading.innerHTML = `
-                <div style="font-size: 32px; margin-bottom: 8px;">⚠️</div>
-                Failed to connect to camera feed
-                <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">
-                    Check if the camera is online and the RTSP stream is accessible
-                </div>
-            `;
-            loading.classList.remove('hidden');
-            img.style.display = 'none';
+            if (overlay.classList.contains('active')) {
+                loading.innerHTML = `
+                    <div style="font-size: 32px; margin-bottom: 8px;">📡</div>
+                    Buffering feed from ${cameraId}...
+                    <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">
+                        Acquiring video stream
+                    </div>
+                `;
+                loading.classList.remove('hidden');
+            }
         };
 
-        img.src = `${API_BASE}/api/cameras/${cameraId}/stream`;
+        // Start stream immediately so feed is visible without waiting
+        img.style.display = 'block';
+        img.src = `${API_BASE}/api/cameras/${cameraId}/stream?t=${Date.now()}`;
+
+        // Safety fallback timer: ensure image is displayed if browser doesn't trigger onload for MJPEG stream
+        if (window._streamSafetyTimeout) clearTimeout(window._streamSafetyTimeout);
+        window._streamSafetyTimeout = setTimeout(() => {
+            if (overlay.classList.contains('active')) {
+                loading.classList.add('hidden');
+                img.style.display = 'block';
+            }
+        }, 300);
+
+        // Dynamically start AI extraction on this specific camera on-demand!
+        fetch(`${API_BASE}/api/cameras/${cameraId}/extract/start`, { method: 'POST' })
+            .then(res => res.json())
+            .then(() => {
+                fetchStats();
+                fetchCameras();
+            })
+            .catch(e => console.warn('Failed to activate extraction:', e));
+
+        // Function to refresh detections for this camera
+        async function refreshModalDetections() {
+            if (!currentModalCameraId || currentModalCameraId !== cameraId) return;
+            try {
+                const res = await fetch(`${API_BASE}/api/cameras/${cameraId}/alerts?limit=15`);
+                const data = await res.json();
+                if (data.alerts && data.alerts.length > 0) {
+                    modalDetections = data.alerts;
+                    renderModalDetections();
+                }
+            } catch (e) {
+                console.warn('Failed to fetch camera alerts:', e);
+            }
+        }
+
+        // Fetch initial alerts immediately
+        refreshModalDetections();
+
+        // Continuous polling while modal is open (every 1.5s)
+        if (window._modalPollInterval) clearInterval(window._modalPollInterval);
+        window._modalPollInterval = setInterval(refreshModalDetections, 1500);
     }
 
-    function closeStreamModal(event) {
-        // If called from overlay click, only close if clicking the overlay itself
+    async function toggleExtraction() {
+        if (!currentModalCameraId) return;
+        const toggleBtn = document.getElementById('modal-extract-toggle');
+        const toggleText = document.getElementById('modal-extract-text');
+        const scanline = document.getElementById('stream-scanline');
+
+        if (currentModalExtracting) {
+            currentModalExtracting = false;
+            if (toggleBtn) toggleBtn.className = 'extract-toggle-btn idle';
+            if (toggleText) toggleText.textContent = 'Extraction Paused';
+            if (scanline) scanline.style.display = 'none';
+            try {
+                await fetch(`${API_BASE}/api/cameras/${currentModalCameraId}/extract/stop`, { method: 'POST' });
+            } catch (e) {
+                console.warn(e);
+            }
+        } else {
+            currentModalExtracting = true;
+            if (toggleBtn) toggleBtn.className = 'extract-toggle-btn';
+            if (toggleText) toggleText.textContent = 'AI Extracting';
+            if (scanline) scanline.style.display = 'block';
+            try {
+                await fetch(`${API_BASE}/api/cameras/${currentModalCameraId}/extract/start`, { method: 'POST' });
+            } catch (e) {
+                console.warn(e);
+            }
+        }
+        fetchStats();
+        fetchCameras();
+    }
+
+    async function closeStreamModal(event) {
         if (event && event.target !== event.currentTarget) return;
+
+        if (window._streamSafetyTimeout) clearTimeout(window._streamSafetyTimeout);
+        if (window._modalPollInterval) {
+            clearInterval(window._modalPollInterval);
+            window._modalPollInterval = null;
+        }
 
         const overlay = document.getElementById('stream-overlay');
         const img = document.getElementById('stream-img');
+        const scanline = document.getElementById('stream-scanline');
 
-        // Clear the src — this makes the browser drop the HTTP connection,
-        // which signals the FastAPI generator to stop and release the RTSP capture
-        img.src = '';
-        img.style.display = 'none';
         img.onload = null;
         img.onerror = null;
+        img.src = '';
+        img.style.display = 'none';
+        if (scanline) scanline.style.display = 'none';
 
         overlay.classList.remove('active');
+
+        // Stop extraction on this camera immediately to prevent lag and free resources
+        if (currentModalCameraId) {
+            const camId = currentModalCameraId;
+            currentModalCameraId = null;
+            try {
+                await fetch(`${API_BASE}/api/cameras/${camId}/extract/stop`, { method: 'POST' });
+                fetchStats();
+                fetchCameras();
+            } catch (e) {
+                console.warn('Failed to stop extraction:', e);
+            }
+        }
+    }
+
+    function renderModalDetections() {
+        const list = document.getElementById('modal-det-list');
+        const count = document.getElementById('modal-det-count');
+        if (!list) return;
+
+        if (count) {
+            count.textContent = `${modalDetections.length} detection${modalDetections.length !== 1 ? 's' : ''}`;
+        }
+
+        if (modalDetections.length === 0) {
+            list.innerHTML = '<div class="cam-det-empty"><span>📡</span> Scanning video stream for vehicles and plates...</div>';
+            return;
+        }
+
+        list.innerHTML = modalDetections.map(a => {
+            const conf = a.confidence != null ? (a.confidence * 100).toFixed(0) + '%' : '—';
+            const vicon = VTYPE_ICONS[a.vehicle_type] || '🚘';
+            const alertJson = encodeURIComponent(JSON.stringify(a));
+            return `
+                <div class="cam-det-card" onclick="openDetailModal('${alertJson}')">
+                    <div class="cam-det-plate">${a.plate_number || '???'}</div>
+                    <div class="cam-det-meta">
+                        <span style="color: var(--text-muted);">${vicon} ${a.vehicle_type || 'Vehicle'}</span>
+                        <span class="alert-confidence ${confidenceClass(a.confidence || 0)}">${conf}</span>
+                    </div>
+                    <div style="font-size: 0.66rem; color: var(--text-muted); font-family: var(--font-mono);">
+                        ${formatTime(a.detected_at || a.timestamp)}
+                    </div>
+                </div>
+            `;
+        }).join('');
     }
 
     // Escape key closes modals
@@ -1305,12 +1707,10 @@
             document.getElementById('detail-area').textContent = alert.area_name || alert.camera_name || 'Unknown Area';
             document.getElementById('detail-cam').textContent = alert.camera_id || '—';
 
-            // Vehicle type
             const vtype = alert.vehicle_type || 'Unknown';
             const vicon = VTYPE_ICONS[vtype] || '🚘';
             document.getElementById('detail-vtype').textContent = `${vicon} ${vtype}`;
 
-            // Vehicle color
             const vcolor = alert.vehicle_color || 'Unknown';
             let colorDot = '⚪';
             if (vcolor === 'Black') colorDot = '⚫';
@@ -1330,6 +1730,24 @@
         if (event && event.target !== event.currentTarget) return;
         document.getElementById('detail-overlay').classList.remove('active');
     }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Init
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    document.addEventListener('DOMContentLoaded', () => {
+        initMap();
+        fetchStats();
+        fetchCameras();
+        fetchAlerts();
+        connectWebSocket();
+
+        setInterval(() => {
+            fetchStats();
+            fetchCameras();
+            fetchAlerts();
+        }, POLL_INTERVAL_MS);
+    });
     </script>
 </body>
 </html>

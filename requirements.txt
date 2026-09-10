@@ -1,15 +1,20 @@
-opencv-python-headless==4.10.0.84
-numpy
-PyYAML==6.0.2
+# Core & Video Capture
+opencv-python>=4.10.0.84
+numpy>=1.26.0
+PyYAML>=6.0.2
+python-dotenv>=1.0.0
+requests>=2.31.0
 
 # Layer 2 — AI & Metadata Extraction
-ultralytics==8.3.40
-easyocr==1.7.2
+ultralytics>=8.3.0
+easyocr>=1.7.0
+fast-alpr[onnx]>=0.4.0
+onnxruntime>=1.18.0
 
 # Layer 3 — Central Message Routing (Kafka)
-confluent-kafka==2.6.1
+confluent-kafka>=2.4.0
 
-# Layer 4 — Dashboard API & SQLite Consumer
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-fast-alpr[onnx]
+# Layer 4 — Dashboard API & Streaming Server
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+websockets>=12.0
