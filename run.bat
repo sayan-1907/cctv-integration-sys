@@ -13,10 +13,13 @@ if not exist ".venv\Scripts\python.exe" (
     exit /b 1
 )
 
+echo [*] Starting Layer 1 & 2 Camera Orchestrator (Edge Streams + AI Workers)...
+start "Sentinel Camera Orchestrator" /min .\.venv\Scripts\python.exe src\orchestrator.py config\live_cameras.yaml
+
 echo [*] Launching Sentinel Command Center in default browser...
 start "" "http://localhost:8000"
 
-echo [*] Starting Uvicorn Server on http://localhost:8000 ...
+echo [*] Starting Sentinel Web API & Streaming Server on http://localhost:8000 ...
 .\.venv\Scripts\python.exe -m uvicorn api:app --app-dir src --host 0.0.0.0 --port 8000
 
 pause
