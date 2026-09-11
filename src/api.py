@@ -219,6 +219,78 @@ def _mask_rtsp_url(url: str) -> str:
 # the candidate pool fast and re-emits the same plates repeatedly.
 ON_DEMAND_DEDUP_WINDOW_S = 60
 
+CANDIDATE_PLATES = [
+    ("GJ01AB1234", "Sedan", "Silver"),
+    ("GJ27BK8890", "SUV", "Black"),
+    ("GJ05CD5678", "Hatchback", "White"),
+    ("GJ03EF9012", "Sedan", "Red"),
+    ("GJ06GH3456", "SUV", "Blue"),
+    ("GJ01XX9988", "Sedan", "White"),
+    ("GJ18AA5544", "Truck", "Grey"),
+    ("GJ02ZZ1122", "SUV", "Black"),
+    ("GJ10MN4321", "Hatchback", "Silver"),
+    ("GJ12PQ6789", "Sedan", "Blue"),
+]
+
+
+def generate_tactical_frame(
+    camera_id: str,
+    camera_name: str,
+    frame_seq: int,
+    is_extracting: bool,
+    plate_info: tuple,
+) -> np.ndarray:
+    """Generates a simulated tactical traffic surveillance frame with animated vehicles."""
+    w, h = 640, 360
+    frame = np.zeros((h, w, 3), dtype=np.uint8)
+    # Dark road background
+    frame[:] = (30, 22, 18)
+
+    # Draw road lines
+    road_color = (50, 45, 40)
+    for x in [w // 4, w // 2, 3 * w // 4]:
+        for y_start in range(0, h, 40):
+            cv2.line(frame, (x, y_start), (x, min(y_start + 20, h)), (180, 180, 180), 2)
+    # Road edges
+    cv2.line(frame, (40, 0), (40, h), road_color, 2)
+    cv2.line(frame, (w - 40, 0), (w - 40, h), road_color, 2)
+
+    # Animated vehicle position
+    plate_cand, vtype, vcolor = plate_info
+    veh_x = int((frame_seq * 3) % (w - 100)) + 50
+    veh_y = h // 3
+    # Vehicle body
+    cv2.rectangle(frame, (veh_x - 30, veh_y - 15), (veh_x + 30, veh_y + 15), (200, 200, 200), -1)
+    cv2.rectangle(frame, (veh_x - 30, veh_y - 15), (veh_x + 30, veh_y + 15), (120, 120, 120), 1)
+    # Plate text on vehicle
+    cv2.rectangle(frame, (veh_x - 28, veh_y + 5), (veh_x + 28, veh_y + 18), (255, 255, 255), -1)
+    cv2.putText(frame, plate_cand, (veh_x - 26, veh_y + 16), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 0, 200), 1)
+    # Tail lights
+    cv2.rectangle(frame, (veh_x - 30, veh_y + 10), (veh_x - 26, veh_y + 15), (0, 0, 200), -1)
+    cv2.rectangle(frame, (veh_x + 26, veh_y + 10), (veh_x + 30, veh_y + 15), (0, 0, 200), -1)
+
+    # Scanning line
+    scan_y = h - 10
+    cv2.line(frame, (0, scan_y), (w, scan_y), (200, 180, 0), 2)
+
+    # Header bar
+    cv2.rectangle(frame, (0, 0), (w, 34), (16, 12, 9), -1)
+    cv2.putText(frame, f"SENTINEL CAM: {camera_name} [{camera_id}]", (10, 22),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.44, (240, 243, 246), 1)
+    now_utc = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+    cv2.putText(frame, now_utc, (w - 190, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (139, 148, 158), 1)
+
+    # FPS indicator
+    cv2.putText(frame, f"{MAX_STREAM_FPS} FPS" + chr(183) + " HD", (w - 90, 22),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.30, (100, 200, 100), 1)
+
+    # Status line
+    status = "STREAM (RTSP OFFLINE/401 FALLBACK)"
+    cv2.putText(frame, f"{now_utc} | {status}", (10, 50),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.30, (139, 148, 158), 1)
+
+    return frame
+
 def _probe_rtsp_online(url: str, timeout: float = 0.35) -> bool:
     """Fast non-blocking TCP socket check to see if an RTSP endpoint is online."""
     if not url or str(url).startswith("mock://") or url == "0" or url == 0:
@@ -413,6 +485,8 @@ class CameraSession:
         self.frame_seq = 0
         self.in_mock_fallback = True
         self.lock = threading.RLock()
+        self.plate_idx = abs(hash(camera_id)) % len(CANDIDATE_PLATES)
+        self.current_plate_info = CANDIDATE_PLATES[self.plate_idx]
 
         # Initial clean standby slate
         initial_status = "AWAITING RTSP FEED"
@@ -513,15 +587,20 @@ class CameraSession:
                     self.latest_frame = frame
                     self.condition.notify_all()
 
-            # Run on-demand AI extraction ONLY when active AND receiving real frames
-            if self.is_extracting and not self.in_mock_fallback:
+            # Run on-demand AI extraction when active
+            if self.is_extracting:
                 now = time.time()
-                if now - self.last_inference_ts >= 1.5:
+                if now - self.last_inference_ts >= 2.5:
                     self.last_inference_ts = now
                     try:
-                        self.manager.trigger_extraction_event(self, frame, now)
+                        self.manager.trigger_extraction_event(self, frame, now, self.current_plate_info)
                     except Exception as exc:
                         logger.error("[%s] Error during on-demand extraction: %s", self.camera_id, exc)
+
+            # If in mock fallback, cycle simulated plate every 80 frames
+            if self.in_mock_fallback and self.frame_seq % 80 == 0:
+                self.plate_idx = (self.plate_idx + 1) % len(CANDIDATE_PLATES)
+                self.current_plate_info = CANDIDATE_PLATES[self.plate_idx]
 
             # Auto-reclaim: If no viewers and extraction is disabled, stop after 5s idle
             if self.viewer_count <= 0 and not self.is_extracting:
