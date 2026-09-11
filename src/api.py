@@ -797,52 +797,69 @@ async def global_mock_extraction_loop():
     Continuously runs in the background and simulates AI extraction
     across ALL cameras, not just the one currently opened by the user.
     This populates the global feed and simulates a fully active grid.
+
+    IMPORTANT: This does NOT call get_or_create_session() or session.start()
+    because those spawn worker threads that try to connect to offline RTSP
+    streams, which hangs for ~30s each and blocks the entire event loop.
+    Instead, we create lightweight session objects and call trigger_extraction_event
+    directly with mock frames.
     """
     logger.info("Started global background mock extraction loop for all cameras")
-    
-    # Give the server a few seconds to fully start before spamming alerts
+
+    # Give the server a few seconds to fully start
     await asyncio.sleep(5.0)
-    
-    # Convert dict keys to a list once
+
     camera_ids = list(CAMERA_CONFIGS.keys())
     if not camera_ids:
+        logger.warning("No cameras configured — global extraction loop exiting")
         return
-        
+
+    logger.info("Global extraction loop active for %d cameras", len(camera_ids))
+
     while True:
-        # Wait a short interval between global extractions (e.g. 1-3 seconds)
-        await asyncio.sleep(random.uniform(1.0, 3.0))
-        
+        # Wait a short interval between global extractions
+        await asyncio.sleep(random.uniform(1.5, 3.5))
+
         try:
             # Pick a random camera
             camera_id = random.choice(camera_ids)
-            
-            # Use get_or_create_session which safely initializes a CameraSession
-            session = extraction_manager.get_or_create_session(camera_id)
-            
-            # If a user is actively viewing this camera and it's already extracting
-            # via the UI, let the UI thread handle it to avoid duplicate fast-fires.
-            if session.is_extracting and session.viewer_count > 0:
+
+            # Check if there's already an active session with a viewer — skip
+            # to avoid duplicate events with the per-camera on-demand worker.
+            existing = extraction_manager.sessions.get(camera_id)
+            if existing and existing.is_extracting and existing.viewer_count > 0:
                 continue
-                
+
+            # Create a lightweight session if one doesn't exist yet.
+            # We do NOT call .start() — no worker thread, no RTSP connection.
+            if camera_id not in extraction_manager.sessions:
+                rtsp_url = CAMERA_RTSP_URLS.get(camera_id, "")
+                cfg = CAMERA_CONFIGS.get(camera_id, {})
+                name = cfg.get("camera_name", camera_id)
+                session = CameraSession(camera_id, rtsp_url, name, extraction_manager)
+                session.in_mock_fallback = True  # always mock for background loop
+                extraction_manager.sessions[camera_id] = session
+            else:
+                session = extraction_manager.sessions[camera_id]
+
             # Pick a random plate and generate a mock frame
             plate_info = random.choice(CANDIDATE_PLATES)
             cfg = CAMERA_CONFIGS.get(camera_id, {})
             name = cfg.get("camera_name", camera_id)
-            
+
             frame = generate_tactical_frame(camera_id, name, 0, True, plate_info)
-            
-            # Temporarily force in_mock_fallback to True for this event
-            # so we don't accidentally trigger a heavy real YOLO model inference
-            # in the background event loop thread.
+
+            # Force mock fallback so we don't accidentally trigger YOLO inference
             was_mock = session.in_mock_fallback
             session.in_mock_fallback = True
-            
+
             extraction_manager.trigger_extraction_event(session, frame, time.time(), plate_info)
-            
+
             session.in_mock_fallback = was_mock
-            
+
         except Exception as e:
             logger.error("Error in global mock extraction loop: %s", e)
+
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
