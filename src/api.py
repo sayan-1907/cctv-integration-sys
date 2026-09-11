@@ -541,20 +541,26 @@ class CameraSession:
             if cap is None or not cap.isOpened():
                 if t0 - last_connect_attempt >= connect_cooldown:
                     last_connect_attempt = t0
-                    try:
-                        cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
-                        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                        if cap.isOpened():
-                            logger.info("[%s] Successfully connected to live RTSP feed!", self.camera_id)
-                            self.in_mock_fallback = False
-                        else:
-                            cap.release()
-                            cap = None
-                            self.in_mock_fallback = True
-                    except Exception as e:
-                        logger.warning("[%s] RTSP connect exception: %s", self.camera_id, e)
+                    
+                    # Skip connection attempt if using dummy credentials or mock to avoid blocking
+                    if "your_email" in str(self.rtsp_url) or str(self.rtsp_url).startswith("mock://"):
                         cap = None
                         self.in_mock_fallback = True
+                    else:
+                        try:
+                            cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
+                            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                            if cap.isOpened():
+                                logger.info("[%s] Successfully connected to live RTSP feed!", self.camera_id)
+                                self.in_mock_fallback = False
+                            else:
+                                cap.release()
+                                cap = None
+                                self.in_mock_fallback = True
+                        except Exception as e:
+                            logger.warning("[%s] RTSP connect exception: %s", self.camera_id, e)
+                            cap = None
+                            self.in_mock_fallback = True
 
             # If cap is open, grab and read real camera frame
             if cap is not None and cap.isOpened():
@@ -568,13 +574,10 @@ class CameraSession:
                     cap = None
                     self.in_mock_fallback = True
 
-            # If no live frame available, render clean standby slate (zero cartoons)
+            # If no live frame available, render tactical frame with animations
             if frame is None:
                 self.in_mock_fallback = True
-                status_text = "CONNECTING TO RTSP FEED..."
-                if "103.250.160.189" in self.rtsp_url and "@" not in self.rtsp_url:
-                    status_text = "401 UNAUTHORIZED: GATEWAY CREDENTIALS REQUIRED IN .ENV"
-                frame = generate_standby_frame(self.camera_id, self.camera_name, self.rtsp_url, status_text)
+                frame = generate_tactical_frame(self.camera_id, self.camera_name, self.frame_seq, self.is_extracting, self.current_plate_info)
 
             self.frame_seq += 1
 
