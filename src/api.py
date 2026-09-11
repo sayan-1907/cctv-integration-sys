@@ -213,8 +213,7 @@ def _mask_rtsp_url(url: str) -> str:
             return "rtsp://***:***@..."
     return url
 
-<<<<<<< HEAD
-=======
+
 # Per-camera plate dedup window (seconds). Much longer than the Layer 2
 # pipeline's 10s window because the simulated extraction cycles through
 # the candidate pool fast and re-emits the same plates repeatedly.
@@ -239,7 +238,6 @@ def _probe_rtsp_online(url: str, timeout: float = 0.35) -> bool:
         return code == 0
     except Exception:
         return False
->>>>>>> 63fb646 (feat: implement plate deduplication, live stream toggle, and background grid extraction)
 
 def generate_standby_frame(
     camera_id: str,
@@ -788,6 +786,7 @@ class OnDemandExtractionManager:
             # Advance to next vehicle in candidate pool
             session.plate_idx = (session.plate_idx + 1) % len(CANDIDATE_PLATES)
             session.current_plate_info = CANDIDATE_PLATES[session.plate_idx]
+        logger.info("[%s] Real-time ANPR extracted: %s (%s, %s, conf=%.2f)",
                     session.camera_id, plate_cand, vtype, vcolor, conf)
 
 extraction_manager = OnDemandExtractionManager(max_concurrent_extractions=2)
