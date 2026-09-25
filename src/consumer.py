@@ -135,18 +135,63 @@ def _ensure_camera_exists(conn, camera_id: str):
     conn.commit()
 
 
+import threading
+import requests
+
+WATCHLIST_CACHE = {}
+WATCHLIST_LOCK = threading.Lock()
+
+def _fuzzy_match(detected_plate: str, target_plate: str) -> bool:
+    """Returns True if plates match exactly or are 1 common OCR error apart."""
+    if detected_plate == target_plate:
+        return True
+    
+    if len(detected_plate) != len(target_plate):
+        return False
+        
+    diffs = 0
+    confusions = {('O', '0'), ('0', 'O'), ('I', '1'), ('1', 'I'), ('B', '8'), ('8', 'B'), ('S', '5'), ('5', 'S'), ('Z', '2'), ('2', 'Z')}
+    
+    for c1, c2 in zip(detected_plate, target_plate):
+        if c1 != c2:
+            if (c1, c2) in confusions:
+                diffs += 1
+            else:
+                return False
+                
+    return diffs <= 1
+
+def refresh_watchlist_cache():
+    """Background thread to refresh watchlist cache from SQLite every 60s."""
+    import sqlite3
+    import time
+    from pathlib import Path
+    
+    db_path = str(Path(__file__).resolve().parent.parent / "sentinel.db")
+    
+    while True:
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("SELECT plate_number, reason, priority FROM watchlist_vehicles WHERE is_active = 1")
+            rows = cur.fetchall()
+            
+            with WATCHLIST_LOCK:
+                WATCHLIST_CACHE.clear()
+                for r in rows:
+                    WATCHLIST_CACHE[r["plate_number"]] = dict(r)
+            
+            cur.close()
+            conn.close()
+        except Exception as e:
+            logger.warning("Failed to refresh watchlist cache: %s", e)
+            
+        time.sleep(60.0)
+
 def handle_anpr_alert(conn, payload: dict):
     """
     Insert an ANPR alert. Idempotent — duplicates are silently ignored.
-
-    Expected payload shape (from ai_worker.build_payload):
-        {
-            "camera_id": "GJ-AHM-TRF-0001",
-            "timestamp": 1693412345.678,
-            "plate_number": "GJ01AB1234",
-            "confidence_score": 0.87,
-            "snapshot_filepath": "../snapshots/GJ-AHM-TRF-0001/1693412345678_GJ01AB1234.jpg"
-        }
     """
     camera_id = payload.get("camera_id")
     if not camera_id:
@@ -157,13 +202,14 @@ def handle_anpr_alert(conn, payload: dict):
 
     import random
     
-    # Mock vehicle type and color if not provided by the edge layer
     vehicle_type = payload.get("vehicle_type", random.choice(["Sedan", "SUV", "Two-Wheeler", "Truck", "Hatchback"]))
     vehicle_color = payload.get("vehicle_color", random.choice(["White", "Black", "Silver", "Red", "Blue", "Grey"]))
 
     detected_at = datetime.fromtimestamp(
         payload["timestamp"], tz=timezone.utc
     ).isoformat()
+    
+    plate_num = payload.get("plate_number", "UNKNOWN")
 
     conn.execute(
         """
@@ -173,7 +219,7 @@ def handle_anpr_alert(conn, payload: dict):
         """,
         (
             camera_id,
-            payload.get("plate_number", "UNKNOWN"),
+            plate_num,
             payload.get("confidence_score"),
             payload.get("snapshot_filepath"),
             detected_at,
@@ -182,6 +228,36 @@ def handle_anpr_alert(conn, payload: dict):
         ),
     )
     conn.commit()
+
+    # --- MATCH TARGET VEHICLES ---
+    matched_target = None
+    match_priority = None
+    
+    with WATCHLIST_LOCK:
+        for target_plate, target_info in WATCHLIST_CACHE.items():
+            if _fuzzy_match(plate_num, target_plate):
+                matched_target = target_info
+                # Exact match = CRITICAL, Fuzzy match = HIGH
+                match_priority = "CRITICAL" if plate_num == target_plate else "HIGH"
+                break
+                
+    if matched_target:
+        logger.warning(f"🚨 WATCHLIST HIT: {plate_num} matched target {matched_target['plate_number']}")
+        hit_payload = {
+            "type": "watchlist_hit",
+            "plate_number": plate_num,
+            "target_plate": matched_target['plate_number'],
+            "camera_id": camera_id,
+            "timestamp": detected_at,
+            "reason": matched_target['reason'],
+            "priority": match_priority,
+            "snapshot_path": payload.get("snapshot_filepath")
+        }
+        try:
+            # Trigger WebSocket broadcast via internal API hook
+            requests.post("http://127.0.0.1:8000/api/internal/watchlist-hit", json=hit_payload, timeout=2)
+        except Exception as e:
+            logger.error(f"Failed to push watchlist hit to API: {e}")
 
 
 def handle_heartbeat(conn, payload: dict):
@@ -282,6 +358,9 @@ def run_consumer(
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
 
+    t = threading.Thread(target=refresh_watchlist_cache, daemon=True)
+    t.start()
+    
     stats = {"processed": 0, "errors": 0, "skipped": 0}
 
     try:

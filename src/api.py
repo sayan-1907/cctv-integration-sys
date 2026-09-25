@@ -21,6 +21,8 @@ import sqlite3
 import asyncio
 import logging
 import random
+import secrets
+import hashlib
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,10 +33,12 @@ import cv2
 import numpy as np
 import yaml
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, HTTPException, Security, Depends
+from fastapi.security.api_key import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 # AI extraction modules from Layer 2
 from stream_worker import FrameEnvelope
@@ -96,6 +100,79 @@ def get_db() -> sqlite3.Connection:
 
 def _rows_to_dicts(rows) -> list[dict]:
     return [dict(row) for row in rows]
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# RBAC -- API Key Authentication & Department-Scoped Access
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def _init_rbac_schema(conn: sqlite3.Connection):
+    """Create the api_keys table and seed a bootstrap admin key on first run."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS api_keys (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            key_hash    TEXT UNIQUE NOT NULL,
+            label       TEXT NOT NULL,
+            department  TEXT NOT NULL DEFAULT 'ALL',
+            role        TEXT NOT NULL DEFAULT 'operator',
+            created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.commit()
+
+    # Mint a bootstrap admin key if none exist
+    cur = conn.execute("SELECT COUNT(*) as n FROM api_keys")
+    if cur.fetchone()["n"] == 0:
+        raw = secrets.token_urlsafe(24)
+        hashed = hashlib.sha256(raw.encode()).hexdigest()
+        conn.execute(
+            "INSERT INTO api_keys (key_hash, label, department, role) VALUES (?, 'Bootstrap Admin', 'ALL', 'admin')",
+            (hashed,)
+        )
+        conn.commit()
+        # Print ONCE — this is the only time the raw key is ever shown
+        print("\n" + "=" * 60)
+        print("  [SENTINEL] BOOTSTRAP API KEY (save this -- shown only once!)")
+        print(f"  Key:   {raw}")
+        print(f"  Role:  admin (sees ALL departments)")
+        print("=" * 60 + "\n")
+        logger.info("[RBAC] Bootstrap admin API key minted -- see console output above")
+
+
+def _resolve_api_key(raw_key: Optional[str]) -> Optional[dict]:
+    """Validate a raw API key. Returns the key row dict or None if invalid."""
+    if not raw_key:
+        return None
+    hashed = hashlib.sha256(raw_key.encode()).hexdigest()
+    conn = get_db()
+    try:
+        cur = conn.execute(
+            "SELECT label, department, role FROM api_keys WHERE key_hash = ?",
+            (hashed,)
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def require_api_key(raw_key: str = Security(API_KEY_HEADER)) -> dict:
+    """FastAPI dependency — raises 401 if key is missing or invalid."""
+    info = _resolve_api_key(raw_key)
+    if info is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or missing X-API-Key header. Obtain a key from the Sentinel Admin."
+        )
+    return info
+
+
+def optional_api_key(raw_key: Optional[str] = Security(API_KEY_HEADER)) -> Optional[dict]:
+    """Same as require_api_key but returns None instead of raising (for open endpoints)."""
+    return _resolve_api_key(raw_key)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -536,6 +613,7 @@ class CameraSession:
         while not self.stop_event.is_set():
             t0 = time.time()
             frame = None
+            current_pts = 0.0
 
             # Attempt to connect or reconnect to RTSP feed
             if cap is None or not cap.isOpened():
@@ -565,6 +643,7 @@ class CameraSession:
             # If cap is open, grab and read real camera frame
             if cap is not None and cap.isOpened():
                 ret, raw_frame = cap.read()
+                current_pts = cap.get(cv2.CAP_PROP_POS_MSEC)
                 if ret and raw_frame is not None:
                     frame = raw_frame
                     self.in_mock_fallback = False
@@ -596,7 +675,7 @@ class CameraSession:
                 if now - self.last_inference_ts >= 2.5:
                     self.last_inference_ts = now
                     try:
-                        self.manager.trigger_extraction_event(self, frame, now, self.current_plate_info)
+                        self.manager.trigger_extraction_event(self, frame, now, self.current_plate_info, pts_ms=current_pts)
                     except Exception as exc:
                         logger.error("[%s] Error during on-demand extraction: %s", self.camera_id, exc)
 
@@ -773,8 +852,10 @@ class OnDemandExtractionManager:
             session.plate_sighting_count[plate_number] = 1
             return False
 
-    def trigger_extraction_event(self, session: CameraSession, frame: np.ndarray, timestamp: float, plate_info: tuple[str, str, str]):
-        det_at = datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
+    def trigger_extraction_event(self, session: CameraSession, frame: np.ndarray, timestamp: float, plate_info: tuple[str, str, str], pts_ms: float = 0.0):
+        # Use PTS for physically accurate timestamp (network-independent physics)
+        pts_ms = pts_ms if pts_ms > 0.0 else (timestamp * 1000.0)
+        det_at = datetime.fromtimestamp(pts_ms / 1000.0, tz=timezone.utc).isoformat()
 
         # If live video stream is active, run the real YOLOv8 + OCR model!
         if not session.in_mock_fallback:
@@ -804,6 +885,7 @@ class OnDemandExtractionManager:
                                 "confidence": conf,
                                 "detected_at": det_at,
                                 "timestamp": det_at,
+                                "pts_ms": pts_ms,
                                 "vehicle_type": "Vehicle",
                                 "vehicle_color": "Identified",
                                 "snapshot_path": snap_url,
@@ -812,6 +894,8 @@ class OnDemandExtractionManager:
                                 "sighting_count": 1,
                             }
                             self.persist_and_broadcast(alert)
+                            # ── Cross-Camera Tracking: attempt retroactive merge ──
+                            _retroactive_merge(det.plate_number, session.camera_id, det_at, cfg)
                             with session.lock:
                                 session.recent_alerts.insert(0, alert)
                                 if len(session.recent_alerts) > 50:
@@ -853,6 +937,7 @@ class OnDemandExtractionManager:
             "confidence": conf,
             "detected_at": det_at,
             "timestamp": det_at,
+            "pts_ms": pts_ms,
             "vehicle_type": vtype,
             "vehicle_color": vcolor,
             "snapshot_path": snap_url,
@@ -861,6 +946,8 @@ class OnDemandExtractionManager:
             "sighting_count": 1,
         }
         self.persist_and_broadcast(alert)
+        # ── Cross-Camera Tracking: attempt retroactive merge on each new plate ──
+        _retroactive_merge(plate_cand, session.camera_id, det_at, cfg)
         with session.lock:
             session.recent_alerts.insert(0, alert)
             if len(session.recent_alerts) > 50:
@@ -872,6 +959,124 @@ class OnDemandExtractionManager:
                     session.camera_id, plate_cand, vtype, vcolor, conf)
 
 extraction_manager = OnDemandExtractionManager(max_concurrent_extractions=2)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Cross-Camera Tracking -- Anonymous Vehicle Resolution
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _init_anonymous_tracks_schema(conn: sqlite3.Connection):
+    """Create the anonymous_vehicle_tracks table for cross-camera identity resolution."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS anonymous_vehicle_tracks (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            anon_id         TEXT NOT NULL,       -- e.g. 'ANON-cam12-RedSedan-1234'
+            camera_id       TEXT NOT NULL,
+            vehicle_type    TEXT,
+            vehicle_color   TEXT,
+            first_seen_at   TEXT NOT NULL,
+            last_seen_at    TEXT NOT NULL,
+            resolved_plate  TEXT,               -- filled in when retroactively resolved
+            resolved_at     TEXT,
+            resolved_camera TEXT
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_anon_tracks_type_color ON anonymous_vehicle_tracks (vehicle_type, vehicle_color)")
+    conn.commit()
+
+
+def _save_anonymous_track(camera_id: str, vehicle_type: str, vehicle_color: str, detected_at: str) -> str:
+    """
+    Log a vehicle sighting where the plate was unreadable.
+    Returns the generated anon_id so it can be referenced later.
+    """
+    import uuid
+    anon_id = f"ANON-{camera_id}-{vehicle_color}{vehicle_type}-{uuid.uuid4().hex[:6].upper()}"
+    try:
+        conn = get_db()
+        conn.execute("""
+            INSERT INTO anonymous_vehicle_tracks
+                (anon_id, camera_id, vehicle_type, vehicle_color, first_seen_at, last_seen_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (anon_id, camera_id, vehicle_type, vehicle_color, detected_at, detected_at))
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        logger.error("Failed to save anonymous track: %s", exc)
+    return anon_id
+
+
+def _retroactive_merge(plate_number: str, resolving_camera: str, resolved_at: str, cam_cfg: dict):
+    """
+    Cross-Camera Identity Resolution:
+    When a plate is successfully read on camera B, search back in the
+    anonymous_vehicle_tracks table for matching (vehicle_type, vehicle_color)
+    sightings from other cameras within the past 5 minutes.
+    If matches are found, retroactively link them to this plate so investigators
+    can see the full journey of the vehicle across cameras.
+    """
+    try:
+        # Look up what vehicle type/color we just identified (from the most recent alert)
+        conn = get_db()
+        cur = conn.execute("""
+            SELECT vehicle_type, vehicle_color FROM anpr_alerts
+            WHERE plate_number = ? ORDER BY detected_at DESC LIMIT 1
+        """, (plate_number,))
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return
+        vehicle_type = row["vehicle_type"]
+        vehicle_color = row["vehicle_color"]
+
+        # Find unresolved anonymous tracks of the same type/color from other cameras
+        cur = conn.execute("""
+            SELECT id, anon_id, camera_id, first_seen_at FROM anonymous_vehicle_tracks
+            WHERE vehicle_type = ?
+              AND vehicle_color = ?
+              AND resolved_plate IS NULL
+              AND camera_id != ?
+              AND last_seen_at >= datetime(?, '-5 minutes')
+        """, (vehicle_type, vehicle_color, resolving_camera, resolved_at))
+        matches = cur.fetchall()
+
+        if not matches:
+            conn.close()
+            return
+
+        # Retroactively resolve matching anonymous tracks
+        for match in matches:
+            conn.execute("""
+                UPDATE anonymous_vehicle_tracks
+                SET resolved_plate = ?, resolved_at = ?, resolved_camera = ?
+                WHERE id = ?
+            """, (plate_number, resolved_at, resolving_camera, match["id"]))
+        logger.info(
+                "[CROSS-CAM] Anonymous track %s (cam %s, %s %s) resolved to plate %s via cam %s",
+                match["anon_id"], match["camera_id"], vehicle_color, vehicle_type,
+                plate_number, resolving_camera
+            )
+
+        conn.commit()
+        merged_count = len(matches)
+        conn.close()
+
+        # Broadcast the retroactive resolution event to all WebSocket clients
+        if merged_count > 0:
+            merge_event = {
+                "type": "cross_camera_merge",
+                "plate_number": plate_number,
+                "resolving_camera": resolving_camera,
+                "vehicle_type": vehicle_type,
+                "vehicle_color": vehicle_color,
+                "anonymous_tracks_merged": merged_count,
+                "resolved_at": resolved_at,
+                "message": f"[ALERT] Plate {plate_number} ({vehicle_color} {vehicle_type}) retroactively identified from {merged_count} anonymous track(s) across cameras!"
+            }
+            broadcaster.broadcast_sync([merge_event])
+
+    except Exception as exc:
+        logger.error("Retroactive merge error for plate %s: %s", plate_number, exc)
 
 
 async def global_mock_extraction_loop():
@@ -1037,6 +1242,29 @@ async def startup():
     finally:
         conn.close()
 
+    # Initialise the Watchlist schema (new feature table)
+    try:
+        from watchlist_api import init_watchlist_schema
+        init_watchlist_schema()
+    except Exception as exc:
+        logger.warning("Could not init watchlist schema on startup: %s", exc)
+
+    # [RBAC] Initialise RBAC schema and mint bootstrap key if needed
+    try:
+        conn = get_db()
+        _init_rbac_schema(conn)
+        conn.close()
+    except Exception as exc:
+        logger.warning("Could not init RBAC schema on startup: %s", exc)
+
+    # [TRACKING] Initialise Cross-Camera Tracking schema
+    try:
+        conn = get_db()
+        _init_anonymous_tracks_schema(conn)
+        conn.close()
+    except Exception as exc:
+        logger.warning("Could not init anonymous tracks schema on startup: %s", exc)
+
     _load_camera_urls()
     logger.info("Loaded %d cameras across fleet for on-demand monitoring", len(CAMERA_CONFIGS))
 
@@ -1074,11 +1302,14 @@ async def shutdown():
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @app.get("/api/cameras")
-def get_cameras():
-    """Returns all registered cameras with status and location."""
+def get_cameras(key_info: dict = Depends(require_api_key)):
+    """Returns registered cameras. Department operators see only their cameras; admins see all."""
     conn = get_db()
     try:
-        cur = conn.execute("""
+        department = key_info.get("department", "ALL")
+        role = key_info.get("role", "operator")
+
+        base_query = """
             SELECT
                 camera_id,
                 department_id,
@@ -1089,13 +1320,22 @@ def get_cameras():
                 last_seen,
                 registered_at
             FROM camera_registry
-            ORDER BY camera_id
-        """)
+        """
+        if role == "admin" or department == "ALL":
+            cur = conn.execute(base_query + " ORDER BY camera_id")
+        else:
+            cur = conn.execute(base_query + " WHERE department_id = ? ORDER BY camera_id", (department,))
+
         cameras = _rows_to_dicts(cur.fetchall())
     finally:
         conn.close()
 
-    return {"cameras": cameras, "count": len(cameras)}
+    return {
+        "cameras": cameras,
+        "count": len(cameras),
+        "department_filter": key_info.get("department"),
+        "role": key_info.get("role")
+    }
 
 
 @app.get("/api/alerts")
@@ -1225,6 +1465,88 @@ def get_stats():
         "active_extractions_count": len(active_exts),
         "max_extractions_allowed": extraction_manager.max_concurrent_extractions,
     }
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 🔒 RBAC Endpoints
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@app.get("/api/auth/validate")
+def validate_key(key_info: dict = Depends(require_api_key)):
+    """Validates an API key and returns the associated role and department."""
+    return {
+        "valid": True,
+        "label": key_info.get("label"),
+        "department": key_info.get("department"),
+        "role": key_info.get("role"),
+    }
+
+
+class NewKeyRequest(BaseModel):
+    label: str
+    department: str = "ALL"
+    role: str = "operator"
+
+
+@app.post("/api/auth/keys")
+def create_api_key(body: NewKeyRequest, key_info: dict = Depends(require_api_key)):
+    """Admin-only: Create a new scoped API key for a department or officer."""
+    if key_info.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can create new API keys.")
+    raw = secrets.token_urlsafe(24)
+    hashed = hashlib.sha256(raw.encode()).hexdigest()
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO api_keys (key_hash, label, department, role) VALUES (?, ?, ?, ?)",
+            (hashed, body.label, body.department, body.role)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    logger.info("New API key created: label=%s dept=%s role=%s", body.label, body.department, body.role)
+    return {
+        "key": raw,
+        "label": body.label,
+        "department": body.department,
+        "role": body.role,
+        "note": "Save this key immediately — it will not be shown again."
+    }
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 🔄 Cross-Camera Tracking Endpoints
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@app.get("/api/anonymous-tracks")
+def get_anonymous_tracks(
+    resolved: Optional[bool] = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    key_info: dict = Depends(require_api_key),
+):
+    """
+    Returns anonymous vehicle tracks for cross-camera identity resolution.
+    - resolved=true  → show only tracks that have been retroactively identified
+    - resolved=false → show only still-anonymous tracks
+    - resolved=None  → show all
+    """
+    query = "SELECT * FROM anonymous_vehicle_tracks"
+    params = []
+    if resolved is True:
+        query += " WHERE resolved_plate IS NOT NULL"
+    elif resolved is False:
+        query += " WHERE resolved_plate IS NULL"
+    query += " ORDER BY last_seen_at DESC LIMIT ?"
+    params.append(limit)
+
+    conn = get_db()
+    try:
+        cur = conn.execute(query, params)
+        tracks = _rows_to_dicts(cur.fetchall())
+    finally:
+        conn.close()
+
+    return {"tracks": tracks, "count": len(tracks)}
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1446,6 +1768,42 @@ STATIC_DIR = Path(__file__).parent / "static"
 async def serve_dashboard():
     return FileResponse(STATIC_DIR / "index.html")
 
-
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/snapshots", StaticFiles(directory=str(SNAPSHOTS_DIR)), name="snapshots")
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# New Feature Routers (Route Reconstruction, Watchlist, Evidence, Gap Analysis)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+from routes_vehicle import router as routes_vehicle_router
+from watchlist_api import router as watchlist_router
+from evidence_api import router as evidence_router
+from gap_analysis_api import router as gap_analysis_router
+
+app.include_router(routes_vehicle_router)
+app.include_router(watchlist_router)
+app.include_router(evidence_router)
+app.include_router(gap_analysis_router)
+
+class WatchlistHitPayload(BaseModel):
+    type: str
+    plate_number: str
+    target_plate: str
+    camera_id: str
+    timestamp: str
+    reason: str
+    priority: str
+    snapshot_path: str = None
+
+@app.post("/api/internal/watchlist-hit")
+def internal_watchlist_hit(payload: WatchlistHitPayload):
+    """
+    Internal hook used by consumer.py to trigger a watchlist_hit WebSocket broadcast.
+    We bypass broadcast_sync (which wraps data as 'new_alerts') and directly schedule
+    our own message so WatchlistSiren.jsx can distinguish the 'watchlist_hit' type.
+    """
+    if broadcaster._loop and broadcaster._loop.is_running():
+        msg = json.dumps(payload.dict())  # payload already has type='watchlist_hit'
+        asyncio.run_coroutine_threadsafe(broadcaster._send_to_all(msg), broadcaster._loop)
+    return {"status": "broadcasted"}
+

@@ -1008,6 +1008,32 @@
                 </div>
             </div>
             <div class="header-right">
+                <!-- 🔒 API Key Bar -->
+                <div id="api-key-bar" style="display:flex;align-items:center;gap:8px;margin-right:12px;">
+                    <div style="position:relative;display:flex;align-items:center;">
+                        <span style="position:absolute;left:10px;font-size:14px;pointer-events:none;">🔑</span>
+                        <input
+                            id="api-key-input"
+                            type="password"
+                            placeholder="Enter API Key..."
+                            autocomplete="off"
+                            style="padding:6px 12px 6px 32px;background:#111723;border:1px solid #2f3c52;border-radius:8px;color:#f8fafc;font-family:'JetBrains Mono',monospace;font-size:12px;width:220px;outline:none;transition:border-color 0.2s;"
+                            onkeydown="if(event.key==='Enter') validateApiKey()"
+                            onfocus="this.style.borderColor='#0284c7'"
+                            onblur="this.style.borderColor='#2f3c52'"
+                        />
+                    </div>
+                    <button id="api-key-btn" onclick="validateApiKey()" style="padding:6px 14px;background:#0284c7;border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;" onmouseover="this.style.background='#0369a1'" onmouseout="this.style.background='#0284c7'">Connect</button>
+                    <div id="api-key-badge" style="display:none;align-items:center;gap:6px;padding:4px 10px;background:#0f3a1c;border:1px solid #10b981;border-radius:8px;font-size:11px;color:#10b981;font-weight:600;"></div>
+                </div>
+                <nav class="main-nav" id="main-nav">
+                    <button class="nav-tab active" data-tab="dashboard" onclick="switchTab('dashboard')">📡 Dashboard</button>
+                    <button class="nav-tab" data-tab="route" onclick="switchTab('route')">🗺️ Route Tracker</button>
+                    <button class="nav-tab" data-tab="watchlist" onclick="switchTab('watchlist')">🔴 Watchlist</button>
+                    <button class="nav-tab" data-tab="evidence" onclick="switchTab('evidence')">📋 Evidence</button>
+                    <button class="nav-tab" data-tab="coverage" onclick="switchTab('coverage')">🛰️ Coverage</button>
+                    <button class="nav-tab" data-tab="tracks" onclick="switchTab('tracks')">🔄 Cross-Cam</button>
+                </nav>
                 <div class="connection-badge" id="ws-badge">
                     <span class="pulse-dot"></span>
                     <span id="ws-status-text">Connecting...</span>
@@ -1093,6 +1119,179 @@
                 </div>
             </div>
         </main>
+
+        <!-- ─────── Route Tracker Panel ─────── -->
+        <section class="feature-panel" id="panel-route" style="display:none;">
+            <div class="feature-panel-header">
+                <h2 class="feature-panel-title">🗺️ Vehicle Route Reconstruction</h2>
+                <p class="feature-panel-sub">Enter a plate number to reconstruct its complete chronological journey across the statewide camera grid.</p>
+            </div>
+            <div class="route-search-bar">
+                <input type="text" id="route-plate-input" class="route-plate-input" placeholder="e.g. GJ01AB1234" maxlength="12">
+                <button class="route-search-btn" onclick="trackVehicle()">Track Vehicle</button>
+            </div>
+            <div id="route-result" style="display:none;">
+                <div class="route-summary-cards" id="route-summary-cards"></div>
+                <div class="route-layout">
+                    <div id="route-map" class="route-map-container"></div>
+                    <div class="route-timeline" id="route-timeline"></div>
+                </div>
+            </div>
+            <div id="route-empty" class="feature-empty">
+                <div style="font-size:3rem;">🚗</div>
+                <div class="empty-title">No route loaded</div>
+                <div class="empty-desc">Enter a license plate above to reconstruct its journey</div>
+            </div>
+        </section>
+
+        <!-- ─────── Watchlist Panel ─────── -->
+        <section class="feature-panel" id="panel-watchlist" style="display:none;">
+            <div class="feature-panel-header" style="display:flex; justify-content:space-between; align-items:flex-start;">
+                <div>
+                    <h2 class="feature-panel-title">🔴 Target Vehicle Watchlist</h2>
+                    <p class="feature-panel-sub">Cross-referenced in real-time via in-memory cache. Fuzzy OCR matching enabled.</p>
+                </div>
+                <button class="btn-primary" onclick="openAddTargetModal()">+ Add Target</button>
+            </div>
+            <div class="watchlist-table-wrap">
+                <table class="watchlist-table">
+                    <thead><tr>
+                        <th>Plate Number</th><th>Reason</th><th>Priority</th><th>Added At</th><th>Action</th>
+                    </tr></thead>
+                    <tbody id="watchlist-tbody"><tr><td colspan="5" class="table-empty">Loading...</td></tr></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- ─────── Evidence Dossier Panel ─────── -->
+        <section class="feature-panel" id="panel-evidence" style="display:none;">
+            <div class="feature-panel-header">
+                <h2 class="feature-panel-title">📋 Section 65B Evidence Dossier</h2>
+                <p class="feature-panel-sub">Generate a court-admissible PDF with SHA-256 cryptographic hashes for each snapshot.</p>
+            </div>
+            <div class="evidence-form">
+                <div class="form-group">
+                    <label class="form-label">License Plate Number</label>
+                    <input type="text" id="ev-plate" class="form-input" placeholder="e.g. GJ01AB1234">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Start Time</label>
+                        <input type="datetime-local" id="ev-start" class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">End Time</label>
+                        <input type="datetime-local" id="ev-end" class="form-input">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Authorized Operator Name</label>
+                    <input type="text" id="ev-operator" class="form-input" placeholder="e.g. Inspector R. Sharma">
+                </div>
+                <button class="btn-primary" id="ev-generate-btn" onclick="generateEvidence()" style="width:100%; padding: 14px; font-size:1rem; margin-top:8px;">
+                    Generate Certified Dossier (PDF)
+                </button>
+                <div id="ev-status" style="margin-top:12px; font-size:0.85rem; color: var(--text-muted); text-align:center;"></div>
+            </div>
+        </section>
+
+        <!-- ─────── Coverage Map Panel ─────── -->
+        <section class="feature-panel" id="panel-coverage" style="display:none;">
+            <div class="feature-panel-header">
+                <h2 class="feature-panel-title">🛰️ GIS Coverage Gap Analysis</h2>
+                <p class="feature-panel-sub">Green circles = 150m coverage radius. Red markers = blind spots. Amber pins = recommended deployments.</p>
+            </div>
+            <div class="coverage-layout">
+                <div id="coverage-map" class="route-map-container" style="height:500px;"></div>
+                <div class="coverage-stats" id="coverage-stats">
+                    <div class="stat-card" style="background: var(--bg-card); border: 1px solid var(--border-subtle); padding:16px; border-radius:12px;">
+                        <div class="stat-icon" style="color:var(--accent-emerald);">🛰️</div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="cov-area">—</span>
+                            <span class="stat-label">km² Covered</span>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="background: var(--bg-card); border: 1px solid var(--border-subtle); padding:16px; border-radius:12px;">
+                        <div class="stat-icon" style="color:var(--accent-rose);">⚠️</div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="cov-gaps">—</span>
+                            <span class="stat-label">Critical Gaps</span>
+                        </div>
+                    </div>
+                    <div class="stat-card" style="background: var(--bg-card); border: 1px solid var(--border-subtle); padding:16px; border-radius:12px;">
+                        <div class="stat-icon" style="color:var(--accent-amber);">📍</div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="cov-recs">—</span>
+                            <span class="stat-label">Suggested Nodes</span>
+                        </div>
+                    </div>
+                    <div id="coverage-gaps-list" style="margin-top:16px;"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ─────── Add Target Modal ─────── -->
+        <div class="stream-overlay" id="add-target-overlay" onclick="closeAddTargetModal(event)" style="display:none;">
+            <div class="stream-modal" style="max-width:420px;" onclick="event.stopPropagation()">
+                <div class="stream-modal-header">
+                    <div class="stream-modal-title"><h3>Add Target Vehicle</h3></div>
+                    <button class="stream-close-btn" onclick="closeAddTargetModal()">✕</button>
+                </div>
+                <div style="padding:20px; display:flex; flex-direction:column; gap:14px;">
+                    <div class="form-group">
+                        <label class="form-label">License Plate</label>
+                        <input type="text" id="wl-plate" class="form-input" placeholder="e.g. GJ01AB1234" maxlength="12">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Reason</label>
+                        <input type="text" id="wl-reason" class="form-input" placeholder="e.g. Stolen Vehicle, Amber Alert">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Priority</label>
+                        <select id="wl-priority" class="form-input">
+                            <option value="critical">CRITICAL — Immediate Intercept</option>
+                            <option value="high" selected>HIGH — Observe & Report</option>
+                            <option value="medium">MEDIUM — Intelligence Gathering</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; gap:10px; margin-top:8px;">
+                        <button class="btn-secondary" onclick="closeAddTargetModal()" style="flex:1;">Cancel</button>
+                        <button class="btn-danger" onclick="submitAddTarget()" style="flex:1;">Add to Watchlist</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ─────── Watchlist Siren Alert ─────── -->
+        <!-- ─────── Anonymous Merge Alert ─────── -->
+        <div id="merge-banner" style="display:none; position:fixed; top:20px; left:50%; transform:translateX(-50%); z-index:9998; width:min(700px,96vw); animation: modalPopIn 0.3s ease-out;">
+            <div id="merge-inner" style="position:relative; border-radius:14px; overflow:hidden; border:2px solid #3b82f6; background:rgba(30,58,138,0.97); backdrop-filter:blur(12px); box-shadow: 0 0 60px rgba(59,130,246,0.4);">
+                <div style="position:absolute;inset:0;background:#3b82f6;opacity:0.08;animation:pulseGlow 1.2s infinite;"></div>
+                <div style="position:relative; padding:18px 22px; display:flex; gap:16px; align-items:flex-start;">
+                    <div style="flex-shrink:0; width:44px; height:44px; border-radius:50%; background:#1e3a8a; border:2px solid #3b82f6; display:flex; align-items:center; justify-content:center; font-size:1.4rem;">🔄</div>
+                    <div style="flex:1;">
+                        <div style="font-size:0.7rem; font-weight:800; letter-spacing:2px; text-transform:uppercase; color:#93c5fd; margin-bottom:4px;">CROSS-CAMERA IDENTITY RESOLVED</div>
+                        <div id="merge-plate" style="font-family:var(--font-mono); font-size:1.4rem; font-weight:700; color:#fff; margin-bottom:8px;">—</div>
+                        <div id="merge-body" style="font-size:0.82rem; color:#bfdbfe; line-height:1.6;">—</div>
+                    </div>
+                    <button onclick="closeMergeBanner()" style="flex-shrink:0; background:none; border:none; color:#93c5fd; font-size:1.2rem; cursor:pointer; padding:4px;">✕</button>
+                </div>
+            </div>
+        </div>
+        <div id="siren-banner" style="display:none; position:fixed; top:20px; left:50%; transform:translateX(-50%); z-index:9999; width:min(700px,96vw); animation: modalPopIn 0.3s ease-out;">
+            <div id="siren-inner" style="position:relative; border-radius:14px; overflow:hidden; border:2px solid #ef4444; background:rgba(127,29,29,0.97); backdrop-filter:blur(12px); box-shadow: 0 0 60px rgba(239,68,68,0.4);">
+                <div style="position:absolute;inset:0;background:#ef4444;opacity:0.08;animation:pulseGlow 1.2s infinite;"></div>
+                <div style="position:relative; padding:18px 22px; display:flex; gap:16px; align-items:flex-start;">
+                    <div style="flex-shrink:0; width:44px; height:44px; border-radius:50%; background:#991b1b; border:2px solid #ef4444; display:flex; align-items:center; justify-content:center; font-size:1.4rem;">🚨</div>
+                    <div style="flex:1;">
+                        <div style="font-size:0.7rem; font-weight:800; letter-spacing:2px; text-transform:uppercase; color:#fca5a5; margin-bottom:4px;">🔴 WATCHLIST MATCH DETECTED</div>
+                        <div id="siren-plate" style="font-family:var(--font-mono); font-size:1.4rem; font-weight:700; color:#fff; margin-bottom:8px;">—</div>
+                        <div id="siren-body" style="font-size:0.82rem; color:#fecaca; line-height:1.6;">—</div>
+                    </div>
+                    <button onclick="closeSiren()" style="flex-shrink:0; background:none; border:none; color:#fca5a5; font-size:1.2rem; cursor:pointer; padding:4px;">✕</button>
+                </div>
+            </div>
+        </div>
 
         <!-- ─────── Live Stream Modal ─────── -->
         <div class="stream-overlay" id="stream-overlay" onclick="closeStreamModal(event)">
@@ -1208,6 +1407,52 @@
     let currentModalLiveStream = false;  // default: snapshot mode (lightweight)
     let modalDetections = [];
     let _snapshotRefreshInterval = null;
+    // ────────────────────────────────────────────────────────────
+    // RBAC — API Key State and Helper
+    // ────────────────────────────────────────────────────────────
+
+    let _apiKey = localStorage.getItem('sentinel_api_key') || '';
+
+    // Central fetch wrapper — injects X-API-Key on every request
+    async function apiFetch(url, options = {}) {
+        const headers = { ...(options.headers || {}) };
+        if (_apiKey) headers['X-API-Key'] = _apiKey;
+        return fetch(url, { ...options, headers });
+    }
+
+    async function validateApiKey() {
+        const input = document.getElementById('api-key-input');
+        const btn = document.getElementById('api-key-btn');
+        const badge = document.getElementById('api-key-badge');
+        const key = input.value.trim();
+        if (!key) return;
+        btn.textContent = '...';
+        btn.disabled = true;
+        try {
+            const res = await fetch(${API_BASE}/api/auth/validate, { headers: { 'X-API-Key': key } });
+            if (res.ok) {
+                const data = await res.json();
+                _apiKey = key;
+                localStorage.setItem('sentinel_api_key', key);
+                input.style.display = 'none';
+                btn.style.display = 'none';
+                badge.style.display = 'flex';
+                const deptLabel = data.department === 'ALL' ? 'All Depts' : data.department;
+                badge.innerHTML = 'Connected: ' + data.role.toUpperCase() + ' | ' + deptLabel;
+                fetchCameras(); fetchStats(); fetchAlerts();
+            } else {
+                input.style.borderColor = '#ef4444';
+                input.value = '';
+                input.placeholder = 'Invalid key — try again';
+                setTimeout(() => { input.style.borderColor = '#2f3c52'; input.placeholder = 'Enter API Key...'; }, 2500);
+            }
+        } catch(e) { console.error('Key validation error:', e); }
+        finally { btn.textContent = 'Connect'; btn.disabled = false; }
+    }
+
+    // Auto-validate stored key on page load
+    if (_apiKey) { document.getElementById('api-key-input').value = _apiKey; setTimeout(validateApiKey, 800); }
+
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // Map initialization
@@ -1383,7 +1628,7 @@
 
     async function fetchStats() {
         try {
-            const res = await fetch(`${API_BASE}/api/stats`);
+            const res = await apiFetch(`${API_BASE}/api/stats`);
             const data = await res.json();
 
             document.getElementById('stat-cameras').textContent = data.total_cameras || 0;
@@ -1401,7 +1646,7 @@
 
     async function fetchCameras() {
         try {
-            const res = await fetch(`${API_BASE}/api/cameras`);
+            const res = await apiFetch(`${API_BASE}/api/cameras`);
             const data = await res.json();
             updateCameraMarkers(data.cameras || []);
         } catch (e) {
@@ -1411,7 +1656,7 @@
 
     async function fetchAlerts() {
         try {
-            const res = await fetch(`${API_BASE}/api/alerts?limit=50`);
+            const res = await apiFetch(`${API_BASE}/api/alerts?limit=50`);
             const data = await res.json();
             renderAlerts(data.alerts || []);
         } catch (e) {
@@ -1935,6 +2180,566 @@
             fetchAlerts();
         }, POLL_INTERVAL_MS);
     });
+    </script>
+
+    <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+         NEW FEATURES — CSS + JavaScript
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
+    <style>
+        /* ── Nav Tabs ── */
+        .main-nav { display:flex; gap:4px; align-items:center; }
+        .nav-tab {
+            padding: 7px 14px; border-radius: var(--radius-sm);
+            background: transparent; border: 1px solid transparent;
+            color: var(--text-muted); font-size: 0.78rem; font-weight: 600;
+            cursor: pointer; transition: all var(--transition-fast);
+            white-space: nowrap;
+        }
+        .nav-tab:hover { background: var(--bg-card); color: var(--text-primary); border-color: var(--border-subtle); }
+        .nav-tab.active { background: #0284c7; color: #fff; border-color: #0284c7; box-shadow: 0 0 12px rgba(2,132,199,0.35); }
+
+        /* ── Feature Panels ── */
+        .feature-panel { padding: 28px 28px 40px; max-width: 1400px; margin: 0 auto; }
+        .feature-panel-header { margin-bottom: 24px; }
+        .feature-panel-title { font-size: 1.4rem; font-weight: 800; color: var(--text-primary); margin-bottom: 6px; }
+        .feature-panel-sub { font-size: 0.85rem; color: var(--text-muted); }
+        .feature-empty { text-align:center; padding: 60px 20px; color: var(--text-muted); }
+
+        /* ── Route Tracker ── */
+        .route-search-bar { display:flex; gap:12px; margin-bottom:28px; }
+        .route-plate-input {
+            flex:1; padding: 12px 18px; background: var(--bg-card);
+            border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+            color: var(--text-primary); font-family: var(--font-mono); font-size: 1rem;
+            letter-spacing: 2px; text-transform: uppercase;
+        }
+        .route-plate-input:focus { outline:none; border-color: var(--accent-cyan); }
+        .route-search-btn {
+            padding: 12px 28px; background: var(--accent-cyan); color: #000;
+            border:none; border-radius: var(--radius-sm); font-weight: 700;
+            font-size: 0.9rem; cursor: pointer; transition: all var(--transition-fast);
+        }
+        .route-search-btn:hover { background: #00cfee; transform: translateY(-1px); }
+        .route-summary-cards { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px; }
+        .route-stat-card {
+            background: var(--bg-card); border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md); padding: 16px; text-align:center;
+        }
+        .route-stat-label { font-size:0.7rem; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); }
+        .route-stat-value { font-size:1.6rem; font-weight:800; margin-top:4px; }
+        .route-layout { display:grid; grid-template-columns:1fr 300px; gap:20px; }
+        .route-map-container { height:440px; border-radius: var(--radius-md); overflow:hidden; border:1px solid var(--border-subtle); background:#05070a; }
+        .route-timeline { background: var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md); padding:16px; overflow-y:auto; max-height:440px; }
+        .timeline-item { position:relative; padding-left:24px; padding-bottom:20px; border-left:2px solid var(--border-subtle); }
+        .timeline-item:last-child { border-left-color:transparent; padding-bottom:0; }
+        .timeline-dot { position:absolute; left:-7px; top:4px; width:12px; height:12px; border-radius:50%; background:var(--accent-cyan); border:2px solid var(--bg-card); }
+        .timeline-cam { font-weight:700; font-size:0.85rem; color:var(--text-primary); }
+        .timeline-time { font-size:0.72rem; color:var(--text-muted); font-family:var(--font-mono); margin-top:2px; }
+        .timeline-speed { font-size:0.72rem; margin-top:6px; padding:4px 8px; border-radius:4px; display:inline-block; }
+        .speed-ok { background:#064e3b; color:#34d399; }
+        .speed-anomaly { background:#7f1d1d; color:#fca5a5; }
+
+        /* ── Watchlist Table ── */
+        .watchlist-table-wrap { overflow-x:auto; border-radius:var(--radius-md); border:1px solid var(--border-subtle); }
+        .watchlist-table { width:100%; border-collapse:collapse; }
+        .watchlist-table th { padding:12px 16px; text-align:left; font-size:0.72rem; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); background:var(--bg-secondary); border-bottom:1px solid var(--border-subtle); }
+        .watchlist-table td { padding:14px 16px; border-bottom:1px solid var(--border-subtle); font-size:0.85rem; }
+        .watchlist-table tr:last-child td { border-bottom:none; }
+        .watchlist-table tr:hover td { background:rgba(255,255,255,0.02); }
+        .table-empty { text-align:center; padding:40px; color:var(--text-muted); font-style:italic; }
+        .plate-chip { background:var(--bg-secondary); color:var(--accent-cyan); font-family:var(--font-mono); font-size:0.85rem; padding:3px 8px; border-radius:4px; border:1px solid #0c4a6e; }
+        .priority-badge { font-size:0.68rem; font-weight:700; letter-spacing:1px; text-transform:uppercase; padding:3px 8px; border-radius:var(--radius-full); }
+        .priority-critical { background:#7f1d1d; color:#fca5a5; border:1px solid #dc2626; }
+        .priority-high { background:#78350f; color:#fcd34d; border:1px solid #d97706; }
+        .priority-medium { background:#1e3a5f; color:#93c5fd; border:1px solid #3b82f6; }
+        .btn-remove { background:none; border:1px solid var(--border-subtle); color:var(--accent-rose); font-size:0.78rem; padding:5px 12px; border-radius:var(--radius-sm); cursor:pointer; transition:all var(--transition-fast); }
+        .btn-remove:hover { background:#7f1d1d; border-color:#dc2626; }
+
+        /* ── Buttons ── */
+        .btn-primary { padding:10px 20px; background:#0284c7; color:#fff; border:none; border-radius:var(--radius-sm); font-weight:700; cursor:pointer; transition:all var(--transition-fast); }
+        .btn-primary:hover { background:#0ea5e9; }
+        .btn-secondary { padding:10px 20px; background:var(--bg-secondary); color:var(--text-secondary); border:1px solid var(--border-subtle); border-radius:var(--radius-sm); font-weight:600; cursor:pointer; }
+        .btn-danger { padding:10px 20px; background:#dc2626; color:#fff; border:none; border-radius:var(--radius-sm); font-weight:700; cursor:pointer; }
+
+        /* ── Evidence Form ── */
+        .evidence-form { max-width:600px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-lg); padding:28px; display:flex; flex-direction:column; gap:18px; }
+        .form-group { display:flex; flex-direction:column; gap:6px; }
+        .form-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+        .form-label { font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); }
+        .form-input {
+            padding:11px 14px; background:var(--bg-secondary); border:1px solid var(--border-subtle);
+            border-radius:var(--radius-sm); color:var(--text-primary); font-size:0.9rem;
+        }
+        .form-input:focus { outline:none; border-color:var(--accent-cyan); }
+
+        /* ── Coverage Map ── */
+        .coverage-layout { display:grid; grid-template-columns:1fr 280px; gap:20px; }
+        .coverage-stats { display:flex; flex-direction:column; gap:12px; }
+
+        @media (max-width: 900px) {
+            .route-layout, .coverage-layout { grid-template-columns:1fr; }
+            .route-summary-cards { grid-template-columns:1fr 1fr; }
+            .main-nav { display:none; }
+        }
+    </style>
+
+    <script>
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // TAB NAVIGATION
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    let coverageMapInstance = null;
+    let routeMapInstance = null;
+
+    function switchTab(tab) {
+        // Toggle main dashboard visibility
+        document.querySelector('.main').style.display = tab === 'dashboard' ? '' : 'none';
+        ['route', 'watchlist', 'evidence', 'coverage'].forEach(t => {
+            const p = document.getElementById('panel-' + t);
+            if (p) p.style.display = (t === tab) ? '' : 'none';
+        });
+        // Update active button
+        document.querySelectorAll('.nav-tab').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tab);
+        });
+        // Lazy-init feature maps when their tab is first opened
+        if (tab === 'watchlist') loadWatchlist();
+        if (tab === 'coverage') initCoverageMap();
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // FEATURE 1: ROUTE RECONSTRUCTION
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    async function trackVehicle() {
+        const plate = document.getElementById('route-plate-input').value.trim().toUpperCase();
+        if (!plate) return;
+
+        const btn = document.querySelector('.route-search-btn');
+        btn.textContent = 'Tracking…'; btn.disabled = true;
+
+        try {
+            const res = await fetch('/api/vehicles/track', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ plate_number: plate })
+            });
+            const data = await res.json();
+            renderRouteResult(data);
+        } catch(e) {
+            alert('Error fetching route: ' + e.message);
+        } finally {
+            btn.textContent = 'Track Vehicle'; btn.disabled = false;
+        }
+    }
+
+    function renderRouteResult(data) {
+        const { plate, summary, sightings, route_segments, geojson } = data;
+
+        // Summary cards
+        const confColor = summary.confidence_score === 'High' ? 'var(--accent-emerald)' : 'var(--accent-rose)';
+        document.getElementById('route-summary-cards').innerHTML = `
+            <div class="route-stat-card">
+                <div class="route-stat-label">Plate</div>
+                <div class="route-stat-value" style="font-size:1.1rem;font-family:var(--font-mono);color:var(--accent-cyan)">${plate}</div>
+            </div>
+            <div class="route-stat-card">
+                <div class="route-stat-label">Total Distance</div>
+                <div class="route-stat-value" style="color:var(--accent-blue)">${summary.total_distance_km} <span style="font-size:0.9rem">km</span></div>
+            </div>
+            <div class="route-stat-card">
+                <div class="route-stat-label">Avg Speed</div>
+                <div class="route-stat-value" style="color:var(--accent-amber)">${summary.avg_speed_kmh} <span style="font-size:0.9rem">km/h</span></div>
+            </div>
+            <div class="route-stat-card">
+                <div class="route-stat-label">Confidence</div>
+                <div class="route-stat-value" style="color:${confColor}">${summary.confidence_score}</div>
+            </div>`;
+
+        // Timeline
+        const tl = document.getElementById('route-timeline');
+        if (sightings.length === 0) {
+            tl.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">No sightings found.</div>';
+        } else {
+            tl.innerHTML = sightings.map((s, i) => {
+                const seg = route_segments[i];
+                const speedHtml = seg ? `<div class="timeline-speed ${seg.is_anomaly ? 'speed-anomaly' : 'speed-ok'}">
+                    ↓ ${seg.distance_km}km &nbsp; ${seg.speed_kmh}km/h ${seg.is_anomaly ? '⚠ ANOMALY' : ''}
+                </div>` : '';
+                return `<div class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div class="timeline-cam">#${i+1} — ${s.name || s.camera_id}</div>
+                    <div class="timeline-time">${new Date(s.timestamp).toLocaleString()}</div>
+                    ${speedHtml}
+                </div>`;
+            }).join('');
+        }
+
+        // Map
+        document.getElementById('route-result').style.display = '';
+        document.getElementById('route-empty').style.display = 'none';
+
+        // Destroy old map instance if exists
+        if (routeMapInstance) { routeMapInstance.remove(); routeMapInstance = null; }
+        setTimeout(() => {
+            const center = sightings.length > 0 ? [sightings[0].lat || 23.02, sightings[0].lng || 72.57] : [23.02, 72.57];
+            routeMapInstance = L.map('route-map').setView(center, 12);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '© CARTO'
+            }).addTo(routeMapInstance);
+
+            const latLngs = [];
+
+            // Draw OSRM route
+            if (geojson && geojson.coordinates) {
+                const coords = geojson.coordinates.map(c => [c[1], c[0]]);
+                L.polyline(coords, { color: '#00e5ff', weight: 4, opacity: 0.85 }).addTo(routeMapInstance);
+                coords.forEach(c => latLngs.push(c));
+            }
+
+            // Draw markers
+            sightings.forEach((s, i) => {
+                if (s.lat == null) return;
+                const icon = L.divIcon({
+                    className: '',
+                    html: `<div style="background:#0ea5e9;color:#fff;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;border:2px solid #fff;box-shadow:0 0 12px rgba(0,0,0,0.5)">${i+1}</div>`,
+                    iconSize: [26,26], iconAnchor: [13,13]
+                });
+                L.marker([s.lat, s.lng], { icon })
+                    .addTo(routeMapInstance)
+                    .bindPopup(`<b>#${i+1} ${s.name||s.camera_id}</b><br>${new Date(s.timestamp).toLocaleString()}`);
+                latLngs.push([s.lat, s.lng]);
+            });
+
+            // Anomaly segments (fallback polylines on top of OSRM)
+            route_segments.forEach((seg, i) => {
+                if (seg.is_anomaly && sightings[i] && sightings[i+1]) {
+                    const s1 = sightings[i], s2 = sightings[i+1];
+                    if (s1.lat && s2.lat) {
+                        L.polyline([[s1.lat,s1.lng],[s2.lat,s2.lng]], {
+                            color: '#ef4444', weight: 4, dashArray: '10,6', opacity: 0.9
+                        }).addTo(routeMapInstance);
+                    }
+                }
+            });
+
+            if (latLngs.length > 1) routeMapInstance.fitBounds(L.latLngBounds(latLngs), { padding:[40,40] });
+            else if (latLngs.length === 1) routeMapInstance.setView(latLngs[0], 15);
+        }, 100);
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // FEATURE 2: WATCHLIST MANAGEMENT
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    async function loadWatchlist() {
+        const tbody = document.getElementById('watchlist-tbody');
+        try {
+            const res = await fetch('/api/watchlist');
+            const data = await res.json();
+            const targets = data.targets || [];
+            if (targets.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="table-empty">No active targets. Add a vehicle above.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = targets.map(t => {
+                const pClass = `priority-${t.priority}`;
+                return `<tr>
+                    <td><span class="plate-chip">${t.plate_number}</span></td>
+                    <td>${t.reason}</td>
+                    <td><span class="priority-badge ${pClass}">${t.priority.toUpperCase()}</span></td>
+                    <td style="font-family:var(--font-mono);font-size:0.78rem;color:var(--text-muted)">${new Date(t.added_at).toLocaleString()}</td>
+                    <td><button class="btn-remove" onclick="removeTarget('${t.plate_number}')">Remove</button></td>
+                </tr>`;
+            }).join('');
+        } catch(e) {
+            tbody.innerHTML = `<tr><td colspan="5" class="table-empty" style="color:var(--accent-rose)">Error loading watchlist: ${e.message}</td></tr>`;
+        }
+    }
+
+    function openAddTargetModal() {
+        document.getElementById('add-target-overlay').style.display = 'flex';
+        document.getElementById('add-target-overlay').style.alignItems = 'center';
+        document.getElementById('add-target-overlay').style.justifyContent = 'center';
+        document.getElementById('add-target-overlay').classList.add('active');
+    }
+
+    function closeAddTargetModal(event) {
+        if (event && event.target !== event.currentTarget) return;
+        document.getElementById('add-target-overlay').classList.remove('active');
+        setTimeout(() => document.getElementById('add-target-overlay').style.display = 'none', 200);
+    }
+
+    async function submitAddTarget() {
+        const plate = document.getElementById('wl-plate').value.trim().toUpperCase();
+        const reason = document.getElementById('wl-reason').value.trim();
+        const priority = document.getElementById('wl-priority').value;
+        if (!plate || !reason) { alert('Please fill in all fields.'); return; }
+        try {
+            const res = await fetch('/api/watchlist', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ plate_number: plate, reason, priority })
+            });
+            if (res.ok) {
+                closeAddTargetModal();
+                document.getElementById('wl-plate').value = '';
+                document.getElementById('wl-reason').value = '';
+                loadWatchlist();
+            } else {
+                const err = await res.json();
+                alert('Error: ' + (err.detail || 'Unknown error'));
+            }
+        } catch(e) { alert('Network error: ' + e.message); }
+    }
+
+    async function removeTarget(plate) {
+        if (!confirm(`Remove ${plate} from watchlist?`)) return;
+        await fetch(`/api/watchlist/${plate}`, { method: 'DELETE' });
+        loadWatchlist();
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // FEATURE 3: EVIDENCE DOSSIER
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    async function generateEvidence() {
+        const plate = document.getElementById('ev-plate').value.trim().toUpperCase();
+        const startRaw = document.getElementById('ev-start').value;
+        const endRaw = document.getElementById('ev-end').value;
+        const operator = document.getElementById('ev-operator').value.trim();
+        const statusEl = document.getElementById('ev-status');
+        const btn = document.getElementById('ev-generate-btn');
+
+        if (!plate || !startRaw || !endRaw || !operator) {
+            statusEl.style.color = 'var(--accent-rose)';
+            statusEl.textContent = '⚠ Please fill in all fields.';
+            return;
+        }
+
+        btn.textContent = '⏳ Generating PDF…'; btn.disabled = true;
+        statusEl.style.color = 'var(--text-muted)';
+        statusEl.textContent = 'Computing SHA-256 hashes and building PDF…';
+
+        try {
+            const res = await fetch('/api/evidence/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    plate_number: plate,
+                    start_time: new Date(startRaw).toISOString(),
+                    end_time: new Date(endRaw).toISOString(),
+                    operator_name: operator
+                })
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || `HTTP ${res.status}`);
+            }
+
+            // Trigger browser download
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const cd = res.headers.get('content-disposition') || '';
+            a.download = cd.split('filename=')[1]?.replace(/"/g,'') || `Dossier_${plate}.pdf`;
+            document.body.appendChild(a); a.click();
+            URL.revokeObjectURL(url); a.remove();
+
+            statusEl.style.color = 'var(--accent-emerald)';
+            statusEl.textContent = '✅ Dossier downloaded successfully.';
+        } catch(e) {
+            statusEl.style.color = 'var(--accent-rose)';
+            statusEl.textContent = '❌ Error: ' + e.message;
+        } finally {
+            btn.textContent = 'Generate Certified Dossier (PDF)'; btn.disabled = false;
+        }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // FEATURE 4: COVERAGE MAP
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    async function initCoverageMap() {
+        if (coverageMapInstance) return; // already initialised
+
+        coverageMapInstance = L.map('coverage-map').setView([22.9, 72.6], 10);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '© CARTO'
+        }).addTo(coverageMapInstance);
+
+        try {
+            // Draw existing cameras as 150m green coverage circles
+            const camRes = await fetch('/api/cameras');
+            const camData = await camRes.json();
+            const cameras = camData.cameras || [];
+            cameras.forEach(cam => {
+                if (!cam.latitude) return;
+                L.circle([cam.latitude, cam.longitude], {
+                    radius: 150, color: '#10b981', fillColor: '#10b981',
+                    fillOpacity: 0.12, weight: 1.5
+                }).addTo(coverageMapInstance)
+                .bindPopup(`<b>${cam.camera_name || cam.camera_id}</b><br><small>${cam.latitude}, ${cam.longitude}</small>`);
+            });
+
+            // Load gap analysis
+            const gapRes = await fetch('/api/cameras/coverage-analysis');
+            const gapData = await gapRes.json();
+
+            document.getElementById('cov-area').textContent = gapData.total_covered_area_km2;
+            document.getElementById('cov-gaps').textContent = gapData.coverage_gaps.length;
+            document.getElementById('cov-recs').textContent = gapData.recommended_deployments.length;
+
+            // Gap markers (red)
+            const gapIcon = L.divIcon({ className:'', html:`<div style="width:18px;height:18px;border-radius:50%;background:#ef4444;border:2px solid #fff;box-shadow:0 0 16px #ef4444;animation:pulseGlow 1.5s infinite"></div>`, iconSize:[18,18], iconAnchor:[9,9] });
+            gapData.coverage_gaps.forEach(g => {
+                L.marker([g.location.lat, g.location.lng], { icon: gapIcon })
+                    .addTo(coverageMapInstance)
+                    .bindPopup(`<b>⚠ ${g.severity.toUpperCase()} GAP</b><br>${g.description}`);
+            });
+
+            // Recommended deployment pins (amber)
+            const recIcon = L.divIcon({ className:'', html:`<div style="width:22px;height:22px;border-radius:50%;background:#f59e0b;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-weight:700;color:#000;font-size:13px;box-shadow:0 0 14px rgba(245,158,11,0.8)">+</div>`, iconSize:[22,22], iconAnchor:[11,11] });
+            gapData.recommended_deployments.forEach(r => {
+                L.marker([r.lat, r.lng], { icon: recIcon })
+                    .addTo(coverageMapInstance)
+                    .bindPopup(`<b>📍 Suggested Placement</b><br>${r.reason}`);
+            });
+
+            // Gaps list panel
+            const listEl = document.getElementById('coverage-gaps-list');
+            if (gapData.coverage_gaps.length > 0) {
+                listEl.innerHTML = '<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:10px;">Identified Blind Spots</div>' +
+                    gapData.coverage_gaps.map(g => `
+                        <div style="background:var(--bg-secondary);border:1px solid #7f1d1d;border-radius:8px;padding:12px;margin-bottom:8px;">
+                            <div style="font-size:0.7rem;font-weight:700;color:#fca5a5;text-transform:uppercase;margin-bottom:4px;">${g.severity} — ${g.gap_id}</div>
+                            <div style="font-size:0.78rem;color:var(--text-secondary)">${g.description}</div>
+                        </div>`).join('');
+            }
+        } catch(e) {
+            console.error('Coverage map error:', e);
+        }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // WATCHLIST SIREN (WebSocket integration)
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    let sirenTimer = null;
+
+    function triggerSiren(hit) {
+        document.getElementById('siren-plate').textContent = `${hit.plate_number} → target: ${hit.target_plate}`;
+        document.getElementById('siren-body').innerHTML =
+            `📍 Detected at <b>${hit.camera_id}</b> &nbsp;|&nbsp; Reason: <b>${hit.reason}</b> &nbsp;|&nbsp; Priority: <b>${hit.priority}</b><br>
+            <span style="font-family:var(--font-mono);font-size:0.72rem;color:#fca5a5">${new Date(hit.timestamp).toLocaleString()}</span>`;
+
+        const banner = document.getElementById('siren-banner');
+        banner.style.display = 'block';
+
+        // Web Audio beep
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            [880, 1200].forEach((freq, i) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.value = freq;
+                gain.gain.setValueAtTime(0.3, ctx.currentTime + i*0.15);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + i*0.15 + 0.15);
+                osc.connect(gain); gain.connect(ctx.destination);
+                osc.start(ctx.currentTime + i*0.15);
+                osc.stop(ctx.currentTime + i*0.15 + 0.15);
+            });
+        } catch(e) {}
+
+        // Auto-dismiss after 12s
+        clearTimeout(sirenTimer);
+        sirenTimer = setTimeout(closeSiren, 12000);
+    }
+
+    function closeSiren() {
+        clearTimeout(sirenTimer);
+        document.getElementById('siren-banner').style.display = 'none';
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // ANONYMOUS MERGE ALERT
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    let mergeTimer = null;
+
+    function triggerMergeNotification(data) {
+        document.getElementById('merge-plate').textContent = data.plate_number;
+        document.getElementById('merge-body').innerHTML =
+            `📍 Retroactively identified at <b>${data.resolving_camera}</b> &nbsp;|&nbsp; <b>${data.anonymous_tracks_merged}</b> anonymous track(s) merged<br>
+            <span style="font-family:var(--font-mono);font-size:0.72rem;color:#93c5fd">${new Date(data.resolved_at).toLocaleString()}</span><br>
+            <i style="color:#60a5fa">${data.message}</i>`;
+
+        const banner = document.getElementById('merge-banner');
+        banner.style.display = 'block';
+
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            [440, 554, 659].forEach((freq, i) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.value = freq;
+                gain.gain.setValueAtTime(0.2, ctx.currentTime + i*0.1);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + i*0.1 + 0.2);
+                osc.connect(gain); gain.connect(ctx.destination);
+                osc.start(ctx.currentTime + i*0.1);
+                osc.stop(ctx.currentTime + i*0.1 + 0.2);
+            });
+        } catch(e) {}
+
+        clearTimeout(mergeTimer);
+        mergeTimer = setTimeout(closeMergeBanner, 8000);
+    }
+
+    function closeMergeBanner() {
+        clearTimeout(mergeTimer);
+        document.getElementById('merge-banner').style.display = 'none';
+    }
+
+    // Hook into the existing WebSocket handler — listen for watchlist_hit type
+    const _origWsOnMessage = window.__sentinel_ws_onmessage;
+    document.addEventListener('DOMContentLoaded', () => {
+        // Patch WebSocket onmessage after connectWebSocket() runs
+        setTimeout(() => {
+            const wsKey = Object.keys(window).find(k => window[k] instanceof WebSocket);
+            // We use a MutationObserver-free approach: intercept at the broadcast level
+            // The WS listener below will be the primary handler
+        }, 500);
+    });
+
+    // Re-export the siren trigger so the existing WS handler can call it
+    window._sirenTrigger = triggerSiren;
+    </script>
+
+    <script>
+    // Patch the existing WebSocket message handler to also handle watchlist_hit
+    const _patchWS = () => {
+        const origConnect = window.connectWebSocket;
+        if (typeof origConnect === 'function') {
+            window.connectWebSocket = function() {
+                origConnect();
+                // Find the WS and add our handler
+                setTimeout(() => {
+                    if (window._sentinelWS) {
+                        const origHandler = window._sentinelWS.onmessage;
+                        window._sentinelWS.onmessage = function(event) {
+                            if (origHandler) origHandler.call(this, event);
+                            try {
+                                const data = JSON.parse(event.data);
+                                if (data.type === 'watchlist_hit') {
+                                    triggerSiren(data);
+                                } else if (data.type === 'cross_camera_merge') {
+                                    triggerMergeNotification(data);
+                                }
+                            } catch(e) {}
+                        };
+                    }
+                }, 1000);
+            };
+        }
+    };
+    document.addEventListener('DOMContentLoaded', _patchWS);
     </script>
 </body>
 </html>

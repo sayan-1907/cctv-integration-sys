@@ -9,7 +9,7 @@ department_name: "Sentinel Camera Grid — Live Testing"
 # IMPORTANT: Start with 4. Each stream = 1 OS process + OpenCV decode.
 # Raise only after confirming CPU/RAM headroom with htop/Task Manager.
 max_concurrent_streams: 10
-
+0
 target_decode_fps: 5
 queue_max_size: 5
 

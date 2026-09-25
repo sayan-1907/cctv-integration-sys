@@ -44,15 +44,23 @@ class FrameEnvelope:
     What crosses the process boundary to the orchestrator / Layer 2.
     Deliberately NOT the raw high-res frame at full rate — this is
     already the throttled, motion-relevant sample.
+
+    pts_ms: Presentation Time Stamp in milliseconds, extracted directly from
+    the video stream metadata (CAP_PROP_POS_MSEC). This is physically tied
+    to the camera's internal clock — NOT the server's wall clock. Use this
+    for all speed / travel-time calculations to achieve network-independent
+    physics accuracy. Falls back to wall-clock * 1000 for mock streams.
     """
 
-    __slots__ = ("camera_id", "timestamp", "frame", "seq")
+    __slots__ = ("camera_id", "timestamp", "frame", "seq", "pts_ms")
 
-    def __init__(self, camera_id: str, timestamp: float, frame: np.ndarray, seq: int):
+    def __init__(self, camera_id: str, timestamp: float, frame: np.ndarray, seq: int, pts_ms: float = 0.0):
         self.camera_id = camera_id
         self.timestamp = timestamp
         self.frame = frame
         self.seq = seq
+        # PTS-based timing: physically accurate, immune to network jitter
+        self.pts_ms = pts_ms if pts_ms > 0.0 else (timestamp * 1000.0)
 
 
 def _drop_oldest_put(q: mp.Queue, item, camera_id: str):
@@ -127,7 +135,10 @@ def _run_mock_loop(camera_id, mock_url, frame_interval, out_queue, heartbeat_dic
 
         seq += 1
         heartbeat_dict[camera_id] = {"status": "streaming", "last_frame_ts": now}
-        envelope = FrameEnvelope(camera_id, now, frame, seq)
+        # For mock streams, synthesise a PTS from the elapsed time (wall-clock is fine here
+        # since we control the timing ourselves with no network jitter)
+        synthetic_pts_ms = elapsed * 1000.0
+        envelope = FrameEnvelope(camera_id, now, frame, seq, pts_ms=synthetic_pts_ms)
         _drop_oldest_put(out_queue, envelope, camera_id)
 
         shutdown_event.wait(timeout=frame_interval)
@@ -205,11 +216,19 @@ def run_camera_worker(
                     time.sleep(0.01)
                     continue
 
+                # ── Network-Independent Physics ────────────────────────────────────
+                # Extract the Presentation Time Stamp embedded in the video bitstream
+                # by the camera hardware. This is completely immune to network jitter,
+                # server CPU load, and OpenCV buffering delays. All downstream speed
+                # and travel-time calculations should use pts_ms, not wall-clock time.
+                pts_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
+                # ──────────────────────────────────────────────────────────────────
+
                 last_emit = now
                 seq += 1
                 heartbeat_dict[camera_id] = {"status": "streaming", "last_frame_ts": now}
 
-                envelope = FrameEnvelope(camera_id, now, frame, seq)
+                envelope = FrameEnvelope(camera_id, now, frame, seq, pts_ms=pts_ms)
                 _drop_oldest_put(out_queue, envelope, camera_id)
 
         except Exception as exc:

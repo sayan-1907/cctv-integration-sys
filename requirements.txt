@@ -18,3 +18,5 @@ confluent-kafka>=2.4.0
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 websockets>=12.0
+psycopg2-binary>=2.9.9
+reportlab>=4.0.0
