@@ -1429,7 +1429,7 @@
         btn.textContent = '...';
         btn.disabled = true;
         try {
-            const res = await fetch(${API_BASE}/api/auth/validate, { headers: { 'X-API-Key': key } });
+            const res = await fetch(`${API_BASE}/api/auth/validate`, { headers: { 'X-API-Key': key } });
             if (res.ok) {
                 const data = await res.json();
                 _apiKey = key;
@@ -1668,7 +1668,11 @@
     // WebSocket — Real-Time Alert Stream
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+    let _wsPingInterval = null;
+
     function connectWebSocket() {
+        if (_wsPingInterval) clearInterval(_wsPingInterval);
+
         const badge = document.getElementById('ws-badge');
         const statusText = document.getElementById('ws-status-text');
 
@@ -1702,6 +1706,11 @@
                             renderModalDetections();
                         }
                     }
+                } else if (data.type === 'watchlist_hit') {
+                    if (typeof window._sirenTrigger === 'function') window._sirenTrigger(data);
+                    else if (typeof triggerSiren === 'function') triggerSiren(data);
+                } else if (data.type === 'cross_camera_merge') {
+                    if (typeof triggerMergeNotification === 'function') triggerMergeNotification(data);
                 }
             } catch (e) {
                 console.warn('WS message parse error:', e);
@@ -1721,7 +1730,7 @@
             statusText.textContent = 'Error';
         };
 
-        setInterval(() => {
+        _wsPingInterval = setInterval(() => {
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send('ping');
             }
