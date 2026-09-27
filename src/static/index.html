@@ -4,755 +4,1617 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sentinel — ANPR Command Center</title>
-    <meta name="description" content="Tactical ANPR surveillance dashboard with live camera feeds, on-demand plate extraction, and spatial grid analytics.">
+    <meta name="description" content="Statewide Automatic Number Plate Recognition (ANPR) command-center platform. Live surveillance grid, on-demand plate extraction, and spatial forensic analytics.">
 
-    <!-- Fonts -->
+    <!-- Typography: JetBrains Mono + Work Sans -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Work+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,400&display=swap" rel="stylesheet">
 
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
     <style>
-        /* ─────────────── Tactical Solid Design Tokens (Solid Colors) ─────────────── */
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           DESIGN TOKENS — PAPER & INK / COMMAND CENTER GLASS
+           Strictly grey, black, and shades of these two, with paper-white highlights
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
         :root {
-            /* Solid surfaces — strictly solid colors */
-            --bg-primary:     #080b11;
-            --bg-secondary:   #0e131d;
-            --bg-card:        #111723;
-            --bg-panel:       #0d121c;
-            --border-subtle:  #1d2636;
-            --border-active:  #2f3c52;
-            --border-focus:   #0284c7;
+            /* Palette: Paper & Ink / Greyscale Spectrum (Light Theme) */
+            --ink-black:        #ffffff;
+            --ink-void:         #f5f5f8;
+            --ink-deep:         #ebebf0;
+            --ink-surface:      rgba(255, 255, 255, 0.85);
+            --ink-elevated:     rgba(255, 255, 255, 0.95);
+            --ink-card:         rgba(255, 255, 255, 0.75);
+            --ink-well:         rgba(245, 245, 248, 0.90);
 
-            --text-primary:   #f8fafc;
-            --text-secondary: #94a3b8;
-            --text-muted:     #64748b;
+            /* Borders & Glass Specular Highlights */
+            --border-glass:     rgba(0, 0, 0, 0.08);
+            --border-specular:  rgba(0, 0, 0, 0.12);
+            --border-active:    rgba(0, 0, 0, 0.20);
+            --border-focus:     rgba(0, 0, 0, 0.35);
+            --border-subtle:    rgba(0, 0, 0, 0.04);
 
-            /* Crisp solid tactical accents */
-            --accent-cyan:    #00e5ff;
-            --accent-blue:    #38bdf8;
-            --accent-emerald: #10b981;
-            --accent-amber:   #f59e0b;
-            --accent-rose:    #ef4444;
-            --accent-slate:   #475569;
+            /* Typography & Grayscale Shades (Inverted for Light Theme) */
+            --paper-pure:       #050507;
+            --paper-primary:    #121218;
+            --paper-secondary:  #3e3e4c;
+            --paper-muted:      #717182;
+            --paper-dim:        #9292a2;
+            --paper-dark:       #d8d8e2;
 
-            /* Ergonomic rounded geometry */
-            --radius-xs:   4px;
-            --radius-sm:   8px;
-            --radius-md:   12px;
-            --radius-lg:   16px;
-            --radius-xl:   20px;
+            /* Monochrome Accents & Tonal Tints */
+            --mono-chrome:      #121218;
+            --mono-silver:      #3e3e4c;
+            --mono-slate:       #717182;
+            --mono-graphite:    #babac8;
+            --mono-charcoal:    #e5e5ed;
+            --mono-badge-bg:    rgba(0, 0, 0, 0.06);
+            --mono-badge-text:  #121218;
+
+            /* High-Contrast Inverted Tactical Tokens */
+            --inverted-bg:      #08080a;
+            --inverted-text:    #f5f5f8;
+
+            /* Shadows & Glassmorphic Depths */
+            --glass-blur:       blur(22px) saturate(170%);
+            --glass-modal-blur: blur(28px) saturate(180%);
+            --shadow-glass:     0 12px 36px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+            --shadow-card:      0 8px 24px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+            --shadow-modal:     0 24px 64px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.06);
+
+            /* Typography */
+            --font-sans: 'Work Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            --font-mono: 'JetBrains Mono', "SF Mono", Consolas, monospace;
+
+            /* Radii */
+            --radius-xs:  3px;
+            --radius-sm:  6px;
+            --radius-md:  10px;
+            --radius-lg:  14px;
+            --radius-xl:  20px;
             --radius-full: 9999px;
 
-            --shadow-card:  0 6px 20px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--border-subtle);
-            --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.8), 0 0 0 1px var(--border-active);
-            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-
-            --transition-fast:   0.15s ease-out;
-            --transition-smooth: 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            /* Transitions */
+            --trans-fast: 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+            --trans-smooth: 0.28s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
-        /* ─────────────── Reset & Base ─────────────── */
-        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           RESET & FOUNDATION
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+        *, *::before, *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-        html { font-size: 14px; }
+        html {
+            font-size: 13.5px;
+            background-color: var(--ink-void);
+            color-scheme: light;
+        }
 
         body {
             font-family: var(--font-sans);
-            background: var(--bg-primary);
-            color: var(--text-primary);
+            background: var(--ink-void);
+            background-image: 
+                radial-gradient(circle at 50% -20%, rgba(0, 0, 0, 0.02) 0%, transparent 65%),
+                linear-gradient(to bottom, rgba(0,0,0,0.025) 1px, transparent 1px),
+                linear-gradient(to right, rgba(0,0,0,0.025) 1px, transparent 1px);
+            background-size: 100% 100%, 48px 48px, 48px 48px;
+            color: var(--paper-primary);
             line-height: 1.5;
-            overflow-x: hidden;
             min-height: 100vh;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
 
-        /* ─────────────── Keyframe Animations ─────────────── */
+        /* Custom Tactical Scrollbars */
+        ::-webkit-scrollbar {
+            width: 7px;
+            height: 7px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(240, 240, 245, 0.6);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--mono-graphite);
+            border-radius: var(--radius-full);
+            border: 1px solid rgba(0, 0, 0, 0.08);
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--paper-dim);
+        }
+
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           ANIMATIONS & HUD DYNAMICS
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
         @keyframes pulseGlow {
             0%, 100% { transform: scale(1); opacity: 1; }
-            50% { transform: scale(0.72); opacity: 0.45; }
+            50% { transform: scale(0.78); opacity: 0.4; }
         }
 
         @keyframes radarPing {
-            0% { transform: scale(0.85); opacity: 0.95; }
-            70% { transform: scale(2.2); opacity: 0; }
-            100% { transform: scale(2.2); opacity: 0; }
-        }
-
-        @keyframes overlayFadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
+            0% { transform: scale(0.9); opacity: 0.9; }
+            70% { transform: scale(2.4); opacity: 0; }
+            100% { transform: scale(2.4); opacity: 0; }
         }
 
         @keyframes modalPopIn {
-            from { opacity: 0; transform: scale(0.94) translateY(12px); }
+            from { opacity: 0; transform: scale(0.96) translateY(10px); }
             to { opacity: 1; transform: scale(1) translateY(0); }
         }
 
         @keyframes alertSlideIn {
-            from { opacity: 0; transform: translateX(18px); }
-            to { opacity: 1; transform: translateX(0); }
-        }
-
-        @keyframes detCardPop {
-            from { opacity: 0; transform: scale(0.92); }
-            to { opacity: 1; transform: scale(1); }
+            from { opacity: 0; transform: translateY(-8px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
         @keyframes scanHud {
-            0% { top: 0%; opacity: 0.8; }
-            50% { opacity: 1; }
-            100% { top: 98%; opacity: 0.8; }
+            0% { top: 0%; opacity: 0.6; }
+            50% { opacity: 0.9; }
+            100% { top: 98%; opacity: 0.6; }
         }
 
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
 
-        /* ─────────────── Layout ─────────────── */
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           APP CONTAINER
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
         .app {
             position: relative;
             z-index: 1;
-            display: grid;
-            grid-template-rows: auto 1fr;
+            display: flex;
+            flex-direction: column;
             min-height: 100vh;
         }
 
-        /* ─────────────── Header ─────────────── */
-        .header {
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           EDITORIAL MASTHEAD // TOP TELEMETRY STRIP (MAGAZINE FORMAT)
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+        .editorial-dateline {
+            background: rgba(245, 245, 248, 0.94);
+            border-bottom: 1px solid var(--border-subtle);
+            padding: 5px 24px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 14px 24px;
-            background: var(--bg-secondary);
-            border-bottom: 1px solid var(--border-subtle);
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-        }
-
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-        }
-
-        .logo {
-            width: 34px;
-            height: 34px;
-            border-radius: var(--radius-sm);
-            background: #0284c7;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-            font-weight: 800;
-            color: #ffffff;
-            letter-spacing: 0.5px;
-            box-shadow: 0 2px 8px rgba(2, 132, 199, 0.4);
-            transition: transform var(--transition-smooth);
-        }
-        .logo:hover {
-            transform: scale(1.06);
-        }
-
-        .brand {
-            font-size: 1.15rem;
-            font-weight: 800;
-            letter-spacing: 1px;
-            color: #ffffff;
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--paper-muted);
+            letter-spacing: 0.8px;
             text-transform: uppercase;
         }
 
-        .brand-sub {
-            font-size: 0.68rem;
-            color: var(--text-muted);
-            font-weight: 600;
-            letter-spacing: 1.5px;
-            text-transform: uppercase;
-        }
-
-        .header-right {
+        .dateline-left {
             display: flex;
             align-items: center;
             gap: 16px;
         }
 
+        .dateline-pill {
+            padding: 1px 7px;
+            background: rgba(0, 0, 0, 0.08);
+            border: 1px solid rgba(0, 0, 0, 0.12);
+            border-radius: var(--radius-xs);
+            color: var(--paper-primary);
+            font-weight: 600;
+        }
+
+        .dateline-right {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+        }
+
+        .clock-live {
+            color: var(--paper-primary);
+            font-weight: 600;
+        }
+
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           COMMAND CENTER GLASS HEADER (MAGAZINE HEADLINE & MASTHEAD)
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+        .header {
+            display: flex;
+            flex-direction: column;
+            background: var(--ink-surface);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border-bottom: 1px solid var(--border-glass);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            box-shadow: var(--shadow-glass);
+        }
+
+        .header-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 28px;
+            gap: 20px;
+        }
+
+        .header-brand {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .masthead-seal {
+            width: 38px;
+            height: 38px;
+            border-radius: var(--radius-sm);
+            background: linear-gradient(145deg, #2a2a34 0%, #121217 100%);
+            border: 1px solid var(--border-active);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(0, 0, 0, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-sans);
+            font-size: 1.25rem;
+            font-weight: 900;
+            color: var(--paper-pure);
+            letter-spacing: -0.5px;
+            transition: transform var(--trans-smooth);
+        }
+
+        .masthead-seal:hover {
+            transform: scale(1.05);
+            border-color: rgba(0, 0, 0, 0.4);
+        }
+
+        .brand-block {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .brand-title {
+            font-family: var(--font-sans);
+            font-size: 1.35rem;
+            font-weight: 900;
+            letter-spacing: 2.2px;
+            color: var(--paper-pure);
+            text-transform: uppercase;
+            line-height: 1.1;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .brand-title .brand-vol {
+            font-family: var(--font-mono);
+            font-size: 0.65rem;
+            font-weight: 500;
+            letter-spacing: 1px;
+            padding: 2px 6px;
+            background: var(--mono-charcoal);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-xs);
+            color: var(--mono-silver);
+            vertical-align: middle;
+        }
+
+        .brand-kicker {
+            font-family: var(--font-mono);
+            font-size: 0.68rem;
+            color: var(--paper-muted);
+            letter-spacing: 1.4px;
+            text-transform: uppercase;
+            margin-top: 3px;
+        }
+
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        /* Glass API Key Bar */
+        .api-key-box {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .api-key-wrap {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .api-key-icon {
+            position: absolute;
+            left: 10px;
+            font-size: 12px;
+            color: var(--paper-dim);
+            pointer-events: none;
+            font-family: var(--font-mono);
+        }
+
+        .api-key-input {
+            padding: 6px 12px 6px 28px;
+            background: rgba(235, 235, 240, 0.85);
+            border: 1px solid var(--border-specular);
+            border-radius: var(--radius-sm);
+            color: var(--paper-primary);
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            width: 200px;
+            outline: none;
+            transition: all var(--trans-fast);
+        }
+
+        .api-key-input:focus {
+            border-color: rgba(0, 0, 0, 0.5);
+            background: rgba(235, 235, 240, 0.95);
+            box-shadow: 0 0 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .btn-glass {
+            padding: 6px 14px;
+            background: rgba(0, 0, 0, 0.08);
+            border: 1px solid var(--border-specular);
+            border-radius: var(--radius-sm);
+            color: var(--paper-pure);
+            font-family: var(--font-sans);
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            cursor: pointer;
+            transition: all var(--trans-fast);
+        }
+
+        .btn-glass:hover {
+            background: rgba(0, 0, 0, 0.18);
+            border-color: rgba(0, 0, 0, 0.4);
+            transform: translateY(-1px);
+        }
+
+        .api-badge {
+            display: none;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            background: rgba(0, 0, 0, 0.06);
+            border: 1px solid var(--border-active);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--paper-primary);
+            font-weight: 600;
+        }
+
+        /* Connection Status Indicator */
         .connection-badge {
             display: flex;
             align-items: center;
             gap: 7px;
             padding: 5px 12px;
             border-radius: var(--radius-full);
+            font-family: var(--font-mono);
             font-size: 0.72rem;
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            background: #064e3b;
-            color: #34d399;
-            border: 1px solid #059669;
-            transition: var(--transition-smooth);
+            background: rgba(0, 0, 0, 0.05);
+            color: var(--paper-primary);
+            border: 1px solid var(--border-active);
+            transition: var(--trans-smooth);
         }
 
         .connection-badge.disconnected {
-            background: #7f1d1d;
-            color: #f87171;
-            border-color: #dc2626;
+            background: rgba(40, 10, 10, 0.8);
+            color: #d1d1d8;
+            border-color: rgba(180, 40, 40, 0.6);
         }
 
         .pulse-dot {
             width: 7px;
             height: 7px;
             border-radius: 50%;
-            background: currentColor;
+            background: var(--paper-pure);
+            box-shadow: 0 0 8px rgba(0, 0, 0, 0.8);
             animation: pulseGlow 1.8s ease-in-out infinite;
         }
 
-        /* ─────────────── Main Content ─────────────── */
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           MAGAZINE INDEX // TAB NAVIGATION BAR
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+        .header-nav-bar {
+            display: flex;
+            align-items: center;
+            padding: 0 28px;
+            background: rgba(240, 240, 245, 0.5);
+            border-top: 1px solid rgba(0, 0, 0, 0.04);
+            overflow-x: auto;
+        }
+
+        .main-nav {
+            display: flex;
+            gap: 2px;
+            align-items: stretch;
+        }
+
+        .nav-tab {
+            padding: 10px 18px;
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            color: var(--paper-muted);
+            font-family: var(--font-sans);
+            font-size: 0.82rem;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all var(--trans-fast);
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .nav-tab .tab-num {
+            font-family: var(--font-mono);
+            font-size: 0.68rem;
+            color: var(--paper-dim);
+            letter-spacing: 0px;
+        }
+
+        .nav-tab:hover {
+            color: var(--paper-primary);
+            background: rgba(0, 0, 0, 0.03);
+        }
+
+        .nav-tab.active {
+            color: var(--paper-pure);
+            border-bottom-color: var(--paper-pure);
+            background: rgba(0, 0, 0, 0.05);
+            font-weight: 700;
+        }
+
+        .nav-tab.active .tab-num {
+            color: var(--paper-primary);
+        }
+
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           MAIN LAYOUT (MAGAZINE SPREAD)
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
         .main {
             display: grid;
-            grid-template-columns: 1fr 410px;
+            grid-template-columns: 1fr 440px;
             grid-template-rows: auto 1fr;
             gap: 16px;
-            padding: 16px 24px;
-            max-height: calc(100vh - 62px);
+            padding: 18px 28px 24px;
+            height: calc(100vh - 105px);
             overflow: hidden;
         }
 
-        /* ─────────────── Stats Bar ─────────────── */
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           SECTION 01: STATS BAR (MAGAZINE NUMERICAL DISPATCH)
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
         .stats-bar {
             grid-column: 1 / -1;
-            display: flex;
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
             gap: 12px;
         }
 
         .stat-card {
-            flex: 1;
-            background: var(--bg-card);
-            border: 1px solid var(--border-subtle);
+            background: var(--ink-card);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--border-glass);
+            border-top: 1px solid var(--border-specular);
             border-radius: var(--radius-md);
-            padding: 12px 16px;
+            padding: 12px 18px;
             display: flex;
             align-items: center;
-            gap: 12px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-            transition: transform var(--transition-smooth), background-color 0.2s, border-color 0.2s, box-shadow var(--transition-smooth);
+            gap: 14px;
+            box-shadow: var(--shadow-card);
+            transition: all var(--trans-smooth);
             cursor: default;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 40px;
+            height: 40px;
+            background: radial-gradient(circle at top right, rgba(0, 0, 0, 0.04) 0%, transparent 70%);
+            pointer-events: none;
         }
 
         .stat-card:hover {
-            transform: translateY(-3px);
+            transform: translateY(-2px);
             border-color: var(--border-active);
-            background: #141c2a;
-            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
+            background: var(--ink-elevated);
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(0, 0, 0, 0.2);
         }
 
         .stat-icon {
+            font-size: 1.4rem;
+            color: var(--mono-silver);
+            opacity: 0.85;
             width: 38px;
             height: 38px;
-            border-radius: var(--radius-sm);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 18px;
-            flex-shrink: 0;
-            background: #182232;
+            background: rgba(0, 0, 0, 0.04);
             border: 1px solid var(--border-subtle);
-            transition: transform var(--transition-smooth);
+            border-radius: var(--radius-sm);
+            flex-shrink: 0;
         }
 
-        .stat-card:hover .stat-icon {
-            transform: scale(1.08);
+        .stat-info {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
 
-        .stat-info { display: flex; flex-direction: column; }
+        .stat-figure-tag {
+            font-family: var(--font-mono);
+            font-size: 0.62rem;
+            color: var(--paper-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            line-height: 1;
+            margin-bottom: 2px;
+        }
 
         .stat-value {
-            font-size: 1.35rem;
-            font-weight: 800;
-            line-height: 1.2;
             font-family: var(--font-mono);
-            color: #ffffff;
-            font-variant-numeric: tabular-nums;
+            font-size: 1.45rem;
+            font-weight: 800;
+            color: var(--paper-pure);
+            letter-spacing: -0.5px;
+            line-height: 1.1;
         }
 
         .stat-label {
-            font-size: 0.68rem;
-            color: var(--text-muted);
+            font-family: var(--font-sans);
+            font-size: 0.72rem;
+            font-weight: 500;
+            color: var(--paper-muted);
             text-transform: uppercase;
-            letter-spacing: 0.8px;
-            font-weight: 600;
+            letter-spacing: 0.6px;
+            margin-top: 2px;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            overflow: hidden;
         }
 
-        /* ─────────────── Map Panel ─────────────── */
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           SECTION 02: TACTICAL MAP PANEL (MAGAZINE LEAD FEATURE)
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
         .map-panel {
-            background: var(--bg-card);
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-md);
-            overflow: hidden;
+            background: var(--ink-card);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--border-glass);
+            border-top: 1px solid var(--border-specular);
+            border-radius: var(--radius-lg);
             display: flex;
             flex-direction: column;
+            overflow: hidden;
             box-shadow: var(--shadow-card);
+            min-height: 0;
+            position: relative;
         }
 
         .panel-header {
-            padding: 12px 16px;
-            background: var(--bg-panel);
+            padding: 12px 18px;
+            background: rgba(235, 235, 240, 0.85);
             border-bottom: 1px solid var(--border-subtle);
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+
+        .panel-title-wrap {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .section-tag {
+            font-family: var(--font-mono);
+            font-size: 0.68rem;
+            font-weight: 700;
+            color: var(--paper-dim);
+            letter-spacing: 1px;
+            text-transform: uppercase;
         }
 
         .panel-title {
-            font-size: 0.78rem;
-            font-weight: 700;
-            letter-spacing: 0.8px;
+            font-family: var(--font-sans);
+            font-size: 0.92rem;
+            font-weight: 800;
+            color: var(--paper-primary);
             text-transform: uppercase;
-            color: var(--text-primary);
-        }
-
-        .panel-badge {
-            font-size: 0.7rem;
-            padding: 3px 10px;
-            border-radius: var(--radius-full);
-            background: #1e293b;
-            border: 1px solid var(--border-subtle);
-            color: var(--text-secondary);
-            font-weight: 600;
-            font-family: var(--font-mono);
+            letter-spacing: 0.8px;
         }
 
         .quick-cam-select {
-            padding: 4px 10px;
+            padding: 5px 12px;
+            background: rgba(230, 230, 235, 0.9);
+            border: 1px solid var(--border-specular);
             border-radius: var(--radius-sm);
-            background: #090d14;
-            border: 1px solid var(--border-subtle);
-            color: var(--text-primary);
-            font-size: 0.72rem;
-            font-family: var(--font-sans);
+            color: var(--paper-primary);
+            font-family: var(--font-mono);
+            font-size: 0.74rem;
             outline: none;
             cursor: pointer;
-            transition: border-color 0.2s;
+            transition: all var(--trans-fast);
+            max-width: 250px;
         }
-        .quick-cam-select:hover, .quick-cam-select:focus {
-            border-color: var(--border-focus);
+
+        .quick-cam-select:focus, .quick-cam-select:hover {
+            border-color: rgba(0, 0, 0, 0.4);
+            background: rgba(220, 220, 225, 0.95);
+        }
+
+        .panel-badge {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            font-weight: 600;
+            padding: 3px 9px;
+            background: rgba(0, 0, 0, 0.07);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-full);
+            color: var(--paper-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
         }
 
         #map {
             flex: 1;
-            min-height: 300px;
+            width: 100%;
+            height: 100%;
+            background: #ffffff;
+            position: relative;
         }
 
-        /* Leaflet overrides */
-        .leaflet-container { background: var(--bg-primary) !important; }
-        .leaflet-control-zoom a {
-            background: var(--bg-secondary) !important;
-            color: var(--text-primary) !important;
-            border-color: var(--border-subtle) !important;
-            border-radius: var(--radius-xs) !important;
-            transition: background-color 0.15s ease;
+        /* Tactical HUD Corner Crosshairs for Map */
+        .map-panel::before {
+            content: "+";
+            position: absolute;
+            top: 50px;
+            left: 12px;
+            color: rgba(0, 0, 0, 0.2);
+            font-family: var(--font-mono);
+            font-size: 14px;
+            z-index: 500;
+            pointer-events: none;
         }
-        .leaflet-control-zoom a:hover {
-            background: var(--bg-card) !important;
+        .map-panel::after {
+            content: "+";
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
+            color: rgba(0, 0, 0, 0.2);
+            font-family: var(--font-mono);
+            font-size: 14px;
+            z-index: 500;
+            pointer-events: none;
         }
 
-        /* Map marker styling */
+        /* ── Map Layer Selector Pills ── */
+        .layer-pill {
+            padding: 3px 8px;
+            background: rgba(0, 0, 0, 0.06);
+            border: 1px solid var(--border-specular);
+            border-radius: var(--radius-xs);
+            color: var(--paper-muted);
+            font-family: var(--font-mono);
+            font-size: 0.68rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all var(--trans-fast);
+        }
+        .layer-pill:hover {
+            background: rgba(0, 0, 0, 0.14);
+            color: var(--paper-pure);
+        }
+        .layer-pill.active {
+            background: var(--paper-pure);
+            color: #ffffff;
+            border-color: #ffffff;
+        }
+
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           LEAFLET TACTICAL OVERRIDES & MONOCHROME CAMERA PINS
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+        .leaflet-container {
+            font-family: var(--font-sans);
+            background: #ffffff !important;
+        }
+
+        .camera-marker {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
         .camera-marker-pin {
-            width: 30px;
-            height: 30px;
+            width: 28px;
+            height: 28px;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            border: 2px solid #000000;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+            border: 2px solid #ffffff;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.8);
             position: relative;
-            cursor: pointer;
-            transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+            transition: transform var(--trans-fast);
         }
+
         .camera-marker-pin:hover {
-            transform: scale(1.22);
+            transform: scale(1.15);
+            z-index: 1000;
         }
+
         .camera-marker-radar {
             position: absolute;
-            inset: -7px;
+            inset: -8px;
             border-radius: 50%;
-            border: 2px solid #00e5ff;
-            animation: radarPing 1.8s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+            border: 2px solid rgba(0, 0, 0, 0.7);
+            animation: radarPing 2.2s cubic-bezier(0, 0.2, 0.8, 1) infinite;
             pointer-events: none;
         }
 
-        /* Custom map popup */
         .leaflet-popup-content-wrapper {
-            background: var(--bg-secondary) !important;
-            border: 1px solid var(--border-active) !important;
-            border-radius: var(--radius-md) !important;
+            background: rgba(240, 240, 245, 0.95) !important;
+            backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--border-active);
             box-shadow: var(--shadow-modal) !important;
-            color: var(--text-primary) !important;
+            border-radius: var(--radius-md) !important;
+            color: var(--paper-primary) !important;
+            padding: 4px;
         }
-        .leaflet-popup-tip { background: var(--bg-secondary) !important; }
-        .leaflet-popup-close-button { color: var(--text-muted) !important; }
+
+        .leaflet-popup-tip {
+            background: rgba(240, 240, 245, 0.95) !important;
+            border: 1px solid var(--border-active);
+        }
 
         .popup-title {
-            font-weight: 700;
-            font-size: 0.88rem;
+            font-family: var(--font-sans);
+            font-size: 0.95rem;
+            font-weight: 800;
+            color: var(--paper-pure);
             margin-bottom: 2px;
-            color: #ffffff;
         }
+
         .popup-id {
             font-family: var(--font-mono);
-            font-size: 0.68rem;
-            color: var(--text-muted);
+            font-size: 0.72rem;
+            color: var(--paper-muted);
             margin-bottom: 8px;
         }
+
         .popup-status {
             display: inline-block;
-            padding: 3px 8px;
-            border-radius: var(--radius-full);
+            font-family: var(--font-mono);
             font-size: 0.68rem;
             font-weight: 700;
+            padding: 2px 7px;
+            border-radius: var(--radius-xs);
+            background: rgba(0, 0, 0, 0.1);
+            color: var(--paper-primary);
+            border: 1px solid rgba(0, 0, 0, 0.15);
+            margin-bottom: 10px;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            font-family: var(--font-mono);
         }
-        .popup-status.extracting  { background: #083344; color: var(--accent-cyan); border: 1px solid #06b6d4; }
-        .popup-status.idle        { background: #1e293b; color: #94a3b8; border: 1px solid var(--border-subtle); }
-        .popup-status.streaming   { background: #064e3b; color: #34d399; border: 1px solid #059669; }
-        .popup-status.connected   { background: #1e3a8a; color: #60a5fa; border: 1px solid #2563eb; }
-        .popup-status.reconnecting { background: #78350f; color: #fbbf24; border: 1px solid #d97706; }
-        .popup-status.unknown     { background: #334155; color: var(--text-muted); }
-        .popup-status.offline     { background: #7f1d1d; color: var(--accent-rose); border: 1px solid #dc2626; }
+
+        .popup-status.extracting {
+            background: var(--paper-pure);
+            color: #fff;
+            font-weight: 800;
+            border-color: #fff;
+        }
 
         .popup-stream-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            margin-top: 10px;
-            padding: 7px 14px;
-            border: 1px solid #0284c7;
+            display: block;
+            width: 100%;
+            padding: 7px 12px;
+            background: rgba(0, 0, 0, 0.1);
+            border: 1px solid var(--border-specular);
             border-radius: var(--radius-sm);
-            background: #0369a1;
-            color: #ffffff;
+            color: var(--paper-pure);
             font-family: var(--font-sans);
-            font-size: 0.72rem;
+            font-size: 0.78rem;
             font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
             cursor: pointer;
-            transition: transform var(--transition-smooth), background-color 0.15s;
-            text-decoration: none;
-        }
-        .popup-stream-btn:hover {
-            background: #0284c7;
-            transform: translateY(-1px);
-        }
-        .popup-stream-btn:active {
-            transform: translateY(1px);
+            transition: all var(--trans-fast);
+            text-align: center;
         }
 
-        /* ─────────────── Alerts Panel ─────────────── */
+        .popup-stream-btn:hover {
+            background: var(--paper-pure);
+            color: #fff;
+            border-color: #fff;
+        }
+
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           SECTION 03: ALERT FEED (MAGAZINE WIRE SERVICE / DISPATCHES)
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
         .alerts-panel {
-            background: var(--bg-card);
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-md);
-            overflow: hidden;
+            background: var(--ink-card);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--border-glass);
+            border-top: 1px solid var(--border-specular);
+            border-radius: var(--radius-lg);
             display: flex;
             flex-direction: column;
-            max-height: 100%;
+            overflow: hidden;
             box-shadow: var(--shadow-card);
+            min-height: 0;
         }
 
         .search-bar {
-            padding: 10px 14px;
-            background: var(--bg-panel);
+            padding: 10px 16px;
+            background: rgba(240, 240, 245, 0.8);
             border-bottom: 1px solid var(--border-subtle);
+            flex-shrink: 0;
         }
 
         .search-input {
             width: 100%;
             padding: 8px 14px;
+            background: rgba(230, 230, 235, 0.85);
+            border: 1px solid var(--border-specular);
             border-radius: var(--radius-sm);
-            border: 1px solid var(--border-subtle);
-            background: #090d14;
-            color: var(--text-primary);
+            color: var(--paper-pure);
             font-family: var(--font-mono);
-            font-size: 0.8rem;
+            font-size: 0.82rem;
             outline: none;
-            transition: border-color 0.2s, box-shadow 0.2s;
+            transition: all var(--trans-fast);
         }
-        .search-input::placeholder { color: var(--text-muted); }
+
         .search-input:focus {
-            border-color: var(--border-focus);
-            box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.25);
+            border-color: rgba(0, 0, 0, 0.45);
+            background: rgba(26, 26, 34, 0.95);
+            box-shadow: 0 0 14px rgba(0, 0, 0, 0.08);
         }
 
         .alerts-list {
             flex: 1;
             overflow-y: auto;
-            padding: 8px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
         }
 
-        .alerts-list::-webkit-scrollbar { width: 5px; }
-        .alerts-list::-webkit-scrollbar-track { background: transparent; }
-        .alerts-list::-webkit-scrollbar-thumb {
-            background: var(--border-active);
-            border-radius: var(--radius-full);
-        }
-
+        /* Wire Service / Dispatch Alert Card */
         .alert-card {
-            padding: 10px 14px;
-            border-radius: var(--radius-sm);
+            background: rgba(235, 235, 240, 0.7);
             border: 1px solid var(--border-subtle);
-            background: #0d121c;
-            margin-bottom: 7px;
-            transition: transform var(--transition-smooth), background-color 0.2s, border-color 0.2s;
+            border-left: 3px solid var(--mono-slate);
+            border-radius: var(--radius-sm);
+            padding: 11px 14px;
             cursor: pointer;
+            transition: all var(--trans-fast);
+            position: relative;
         }
 
         .alert-card:hover {
-            background: #141c2a;
+            background: rgba(26, 26, 34, 0.9);
             border-color: var(--border-active);
-            transform: translateX(4px);
+            border-left-color: var(--paper-pure);
+            transform: translateX(3px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
         }
 
         .alert-card.new-alert {
-            border-left: 3px solid var(--accent-cyan);
-            background: #0e1724;
-            animation: alertSlideIn 0.35s var(--transition-smooth) forwards;
+            animation: alertSlideIn 0.3s ease-out;
+            border-left-color: var(--paper-pure);
+            background: rgba(32, 32, 42, 0.85);
         }
 
         .alert-top {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 4px;
+            margin-bottom: 5px;
         }
 
         .alert-plate {
             font-family: var(--font-mono);
-            font-size: 1rem;
+            font-size: 1.15rem;
             font-weight: 800;
-            letter-spacing: 1.5px;
-            color: #ffffff;
+            color: var(--paper-pure);
+            letter-spacing: 1.2px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .sighting-badge {
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 1px 6px;
+            background: rgba(0, 0, 0, 0.12);
+            border: 1px solid rgba(0, 0, 0, 0.2);
+            border-radius: var(--radius-xs);
+            color: var(--paper-secondary);
         }
 
         .alert-confidence {
-            font-size: 0.68rem;
-            padding: 2px 8px;
-            border-radius: var(--radius-full);
-            font-weight: 700;
             font-family: var(--font-mono);
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: var(--radius-xs);
+            background: rgba(0, 0, 0, 0.08);
+            color: var(--paper-primary);
+            border: 1px solid var(--border-subtle);
         }
 
-        .conf-high   { background: #064e3b; color: #6ee7b7; border: 1px solid #059669; }
-        .conf-medium { background: #78350f; color: #fcd34d; border: 1px solid #d97706; }
-        .conf-low    { background: #7f1d1d; color: #fca5a5; border: 1px solid #dc2626; }
+        .alert-confidence.conf-high {
+            background: rgba(0, 0, 0, 0.15);
+            color: #ffffff;
+            border-color: rgba(0, 0, 0, 0.3);
+        }
+        .alert-confidence.conf-medium {
+            background: rgba(0, 0, 0, 0.08);
+            color: var(--paper-secondary);
+        }
+        .alert-confidence.conf-low {
+            background: rgba(0, 0, 0, 0.04);
+            color: var(--paper-muted);
+        }
 
         .alert-camera {
-            font-size: 0.72rem;
-            color: var(--text-secondary);
+            font-family: var(--font-sans);
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--paper-secondary);
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
 
         .alert-time {
-            font-size: 0.66rem;
-            color: var(--text-muted);
             font-family: var(--font-mono);
+            font-size: 0.70rem;
+            color: var(--paper-dim);
+            margin-top: 3px;
         }
 
+        /* Empty State */
         .empty-state {
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 60px 20px;
-            color: var(--text-muted);
+            padding: 48px 16px;
             text-align: center;
+            color: var(--paper-dim);
+            font-family: var(--font-sans);
         }
 
         .empty-icon {
-            font-size: 40px;
-            margin-bottom: 10px;
-            opacity: 0.35;
+            font-size: 2.2rem;
+            margin-bottom: 8px;
+            opacity: 0.6;
         }
 
         .empty-title {
             font-weight: 700;
-            font-size: 0.9rem;
-            color: var(--text-secondary);
+            font-size: 0.92rem;
+            color: var(--paper-muted);
             margin-bottom: 4px;
         }
 
         .empty-desc {
-            font-size: 0.75rem;
+            font-size: 0.76rem;
+            color: var(--paper-dim);
         }
 
-        /* ─────────────── Live Stream Modal ─────────────── */
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           MAGAZINE FEATURE PANELS (TABS 02–06)
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+        .feature-panel {
+            padding: 24px 32px 48px;
+            max-width: 1440px;
+            margin: 0 auto;
+            width: 100%;
+            animation: overlayFadeIn 0.25s ease-out;
+        }
+
+        .feature-panel-header {
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--border-subtle);
+            padding-bottom: 16px;
+        }
+
+        .feature-panel-title {
+            font-family: var(--font-sans);
+            font-size: 1.55rem;
+            font-weight: 900;
+            color: var(--paper-pure);
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            margin-bottom: 6px;
+        }
+
+        .feature-panel-sub {
+            font-family: var(--font-mono);
+            font-size: 0.80rem;
+            color: var(--paper-muted);
+            letter-spacing: 0.4px;
+        }
+
+        .feature-empty {
+            text-align: center;
+            padding: 70px 20px;
+            color: var(--paper-dim);
+        }
+
+        /* ── Route Tracker ── */
+        .route-search-bar {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .route-plate-input {
+            flex: 1;
+            padding: 12px 18px;
+            background: var(--ink-card);
+            border: 1px solid var(--border-specular);
+            border-radius: var(--radius-sm);
+            color: var(--paper-pure);
+            font-family: var(--font-mono);
+            font-size: 1.1rem;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            outline: none;
+            transition: border-color var(--trans-fast);
+        }
+
+        .route-plate-input:focus {
+            border-color: rgba(0, 0, 0, 0.5);
+            background: var(--ink-elevated);
+        }
+
+        .route-search-btn {
+            padding: 12px 28px;
+            background: var(--paper-pure);
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-family: var(--font-sans);
+            font-weight: 800;
+            font-size: 0.88rem;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            cursor: pointer;
+            transition: all var(--trans-fast);
+        }
+
+        .route-search-btn:hover {
+            background: #e2e2ec;
+            transform: translateY(-1px);
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+        }
+
+        .route-summary-cards {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px;
+            margin-bottom: 22px;
+        }
+
+        .route-stat-card {
+            background: var(--ink-card);
+            backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--border-glass);
+            border-top: 1px solid var(--border-specular);
+            border-radius: var(--radius-md);
+            padding: 16px;
+            text-align: center;
+        }
+
+        .route-stat-label {
+            font-family: var(--font-mono);
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--paper-muted);
+        }
+
+        .route-stat-value {
+            font-family: var(--font-mono);
+            font-size: 1.55rem;
+            font-weight: 800;
+            margin-top: 4px;
+            color: var(--paper-pure);
+        }
+
+        .route-layout {
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            gap: 20px;
+        }
+
+        .route-map-container {
+            height: 480px;
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            border: 1px solid var(--border-glass);
+            background: #ffffff;
+        }
+
+        .route-timeline {
+            background: var(--ink-card);
+            backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--border-glass);
+            border-radius: var(--radius-md);
+            padding: 18px;
+            overflow-y: auto;
+            max-height: 480px;
+        }
+
+        .timeline-item {
+            position: relative;
+            padding-left: 22px;
+            padding-bottom: 20px;
+            border-left: 2px solid var(--mono-graphite);
+        }
+
+        .timeline-item:last-child {
+            border-left-color: transparent;
+            padding-bottom: 0;
+        }
+
+        .timeline-dot {
+            position: absolute;
+            left: -6px;
+            top: 4px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--paper-pure);
+            border: 2px solid var(--ink-void);
+        }
+
+        .timeline-cam {
+            font-weight: 700;
+            font-size: 0.85rem;
+            color: var(--paper-primary);
+        }
+
+        .timeline-time {
+            font-size: 0.70rem;
+            color: var(--paper-muted);
+            font-family: var(--font-mono);
+            margin-top: 2px;
+        }
+
+        .timeline-speed {
+            font-family: var(--font-mono);
+            font-size: 0.70rem;
+            margin-top: 6px;
+            padding: 3px 8px;
+            border-radius: var(--radius-xs);
+            display: inline-block;
+            font-weight: 600;
+        }
+
+        .speed-ok {
+            background: rgba(0, 0, 0, 0.08);
+            color: var(--paper-primary);
+            border: 1px solid rgba(0, 0, 0, 0.15);
+        }
+
+        .speed-anomaly {
+            background: #ffffff;
+            color: #ffffff;
+            font-weight: 800;
+        }
+
+        /* ── Watchlist Table (Editorial Ledger) ── */
+        .watchlist-table-wrap {
+            overflow-x: auto;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-glass);
+            background: var(--ink-card);
+            backdrop-filter: var(--glass-blur);
+        }
+
+        .watchlist-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .watchlist-table th {
+            padding: 13px 18px;
+            text-align: left;
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--paper-muted);
+            background: rgba(235, 235, 240, 0.85);
+            border-bottom: 1px solid var(--border-glass);
+        }
+
+        .watchlist-table td {
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border-subtle);
+            font-size: 0.86rem;
+            color: var(--paper-secondary);
+        }
+
+        .watchlist-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .watchlist-table tr:hover td {
+            background: rgba(0, 0, 0, 0.03);
+            color: var(--paper-primary);
+        }
+
+        .table-empty {
+            text-align: center;
+            padding: 44px;
+            color: var(--paper-dim);
+            font-family: var(--font-mono);
+            font-style: italic;
+        }
+
+        .plate-chip {
+            background: rgba(0, 0, 0, 0.08);
+            color: var(--paper-pure);
+            font-family: var(--font-mono);
+            font-size: 0.88rem;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: var(--radius-xs);
+            border: 1px solid var(--border-specular);
+        }
+
+        .priority-badge {
+            font-family: var(--font-mono);
+            font-size: 0.68rem;
+            font-weight: 800;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+            padding: 3px 8px;
+            border-radius: var(--radius-xs);
+        }
+
+        .priority-critical {
+            background: #ffffff;
+            color: #ffffff;
+            border: 1px solid #ffffff;
+        }
+
+        .priority-high {
+            background: rgba(0, 0, 0, 0.16);
+            color: #ffffff;
+            border: 1px solid rgba(0, 0, 0, 0.35);
+        }
+
+        .priority-medium {
+            background: rgba(0, 0, 0, 0.07);
+            color: var(--paper-secondary);
+            border: 1px solid var(--border-subtle);
+        }
+
+        .btn-remove {
+            background: none;
+            border: 1px solid var(--border-specular);
+            color: var(--paper-muted);
+            font-family: var(--font-mono);
+            font-size: 0.74rem;
+            padding: 4px 10px;
+            border-radius: var(--radius-xs);
+            cursor: pointer;
+            transition: all var(--trans-fast);
+        }
+
+        .btn-remove:hover {
+            background: rgba(0, 0, 0, 0.1);
+            color: var(--paper-pure);
+            border-color: rgba(0, 0, 0, 0.4);
+        }
+
+        /* ── Buttons ── */
+        .btn-primary {
+            padding: 9px 18px;
+            background: var(--paper-pure);
+            color: #ffffff;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-family: var(--font-sans);
+            font-weight: 800;
+            font-size: 0.82rem;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            cursor: pointer;
+            transition: all var(--trans-fast);
+        }
+
+        .btn-primary:hover {
+            background: #e2e2ec;
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            padding: 9px 18px;
+            background: rgba(0, 0, 0, 0.06);
+            color: var(--paper-secondary);
+            border: 1px solid var(--border-specular);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-sans);
+            font-weight: 700;
+            font-size: 0.82rem;
+            cursor: pointer;
+            transition: all var(--trans-fast);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(0, 0, 0, 0.12);
+            color: var(--paper-pure);
+        }
+
+        .btn-danger {
+            padding: 9px 18px;
+            background: #ffffff;
+            color: #ffffff;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-family: var(--font-sans);
+            font-weight: 800;
+            font-size: 0.82rem;
+            cursor: pointer;
+            transition: all var(--trans-fast);
+        }
+
+        .btn-danger:hover {
+            background: #dddddd;
+        }
+
+        /* ── Evidence Form (Certified Government Dossier) ── */
+        .evidence-form {
+            max-width: 620px;
+            background: var(--ink-card);
+            backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--border-glass);
+            border-top: 1px solid var(--border-specular);
+            border-radius: var(--radius-lg);
+            padding: 28px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            box-shadow: var(--shadow-card);
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .form-label {
+            font-family: var(--font-mono);
+            font-size: 0.70rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: var(--paper-muted);
+        }
+
+        .form-input {
+            padding: 10px 14px;
+            background: rgba(240, 240, 245, 0.85);
+            border: 1px solid var(--border-specular);
+            border-radius: var(--radius-sm);
+            color: var(--paper-pure);
+            font-family: var(--font-mono);
+            font-size: 0.88rem;
+            outline: none;
+            transition: border-color var(--trans-fast);
+        }
+
+        .form-input:focus {
+            border-color: rgba(0, 0, 0, 0.45);
+            background: rgba(230, 230, 235, 0.95);
+        }
+
+        /* ── Coverage Map Layout ── */
+        .coverage-layout {
+            display: grid;
+            grid-template-columns: 1fr 300px;
+            gap: 20px;
+        }
+
+        .coverage-stats {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        /* ── Cross-Camera Identity Layout ── */
+        .tracks-layout {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           COMMAND CENTER GLASS MODALS & OVERLAYS
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
         .stream-overlay {
-            display: none;
             position: fixed;
             inset: 0;
+            background: rgba(4, 4, 6, 0.84);
+            backdrop-filter: var(--glass-modal-blur);
+            -webkit-backdrop-filter: var(--glass-modal-blur);
             z-index: 9999;
-            background: rgba(0, 0, 0, 0.85);
-            backdrop-filter: blur(4px);
+            display: none;
             align-items: center;
             justify-content: center;
+            padding: 24px;
+            opacity: 0;
+            transition: opacity 0.2s ease-out;
         }
 
         .stream-overlay.active {
             display: flex;
-            animation: overlayFadeIn 0.22s var(--transition-smooth) forwards;
+            opacity: 1;
         }
 
         .stream-modal {
-            background: var(--bg-secondary);
+            background: rgba(235, 235, 240, 0.92);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
             border: 1px solid var(--border-active);
+            border-top: 1px solid rgba(0, 0, 0, 0.35);
             border-radius: var(--radius-lg);
+            width: 100%;
+            max-width: 860px;
             box-shadow: var(--shadow-modal);
-            width: 90vw;
-            max-width: 880px;
             overflow: hidden;
-        }
-
-        .stream-overlay.active .stream-modal {
-            animation: modalPopIn 0.26s var(--transition-smooth) forwards;
+            animation: modalPopIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            flex-direction: column;
+            max-height: 92vh;
         }
 
         .stream-modal-header {
+            padding: 14px 20px;
+            background: rgba(235, 235, 240, 0.9);
+            border-bottom: 1px solid var(--border-glass);
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 14px 20px;
-            background: var(--bg-panel);
-            border-bottom: 1px solid var(--border-subtle);
-        }
-
-        .stream-modal-title {
-            display: flex;
-            flex-direction: column;
-            gap: 1px;
+            gap: 12px;
         }
 
         .stream-modal-title h3 {
-            font-size: 0.95rem;
-            font-weight: 700;
-            color: #ffffff;
+            font-family: var(--font-sans);
+            font-size: 1.1rem;
+            font-weight: 800;
+            color: var(--paper-pure);
         }
 
         .stream-modal-title span {
             font-family: var(--font-mono);
-            font-size: 0.68rem;
-            color: var(--text-muted);
+            font-size: 0.72rem;
+            color: var(--paper-muted);
         }
 
-        /* Dynamic On-Demand Extraction Toggle Button */
+        .stream-close-btn {
+            background: rgba(0, 0, 0, 0.08);
+            border: 1px solid var(--border-specular);
+            border-radius: var(--radius-sm);
+            color: var(--paper-primary);
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            cursor: pointer;
+            transition: all var(--trans-fast);
+        }
+
+        .stream-close-btn:hover {
+            background: var(--paper-pure);
+            color: #fff;
+        }
+
+        /* Extraction & Stream Action Toggles */
         .extract-toggle-btn {
             display: flex;
             align-items: center;
-            gap: 7px;
-            padding: 6px 14px;
+            gap: 6px;
+            padding: 5px 12px;
             border-radius: var(--radius-full);
-            background: #0284c7;
-            border: 1px solid #38bdf8;
+            background: var(--paper-pure);
             color: #ffffff;
+            border: 1px solid #ffffff;
+            font-family: var(--font-mono);
             font-size: 0.72rem;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-            text-transform: uppercase;
+            font-weight: 800;
             cursor: pointer;
-            transition: transform var(--transition-smooth), background-color 0.15s;
+            transition: all var(--trans-fast);
+            text-transform: uppercase;
         }
-        .extract-toggle-btn:hover {
-            background: #0369a1;
-            transform: translateY(-1px);
-        }
-        .extract-toggle-btn:active {
-            transform: translateY(1px);
-        }
+
         .extract-toggle-btn.idle {
-            background: #1e293b;
-            border-color: #334155;
-            color: #94a3b8;
+            background: rgba(0, 0, 0, 0.06);
+            color: var(--paper-muted);
+            border-color: var(--border-specular);
         }
+
         .extract-dot {
-            width: 7px;
-            height: 7px;
+            width: 6px;
+            height: 6px;
             border-radius: 50%;
-            background: #ffffff;
-            animation: pulseGlow 1.5s ease-in-out infinite;
-        }
-        .extract-toggle-btn.idle .extract-dot {
-            background: #64748b;
-            animation: none;
+            background: currentColor;
+            animation: pulseGlow 1.4s infinite;
         }
 
         .stream-live-badge {
             display: flex;
             align-items: center;
             gap: 6px;
-            padding: 5px 10px;
+            padding: 5px 12px;
             border-radius: var(--radius-full);
-            background: #1e293b;
-            border: 1px solid #334155;
-            color: #94a3b8;
-            font-size: 0.68rem;
-            font-weight: 700;
-            letter-spacing: 0.8px;
-            text-transform: uppercase;
+            background: rgba(0, 0, 0, 0.08);
+            color: var(--paper-muted);
+            border: 1px solid var(--border-specular);
             font-family: var(--font-mono);
+            font-size: 0.72rem;
+            font-weight: 700;
             cursor: pointer;
-            transition: background-color 0.2s, border-color 0.2s, color 0.2s, transform var(--transition-smooth);
+            transition: all var(--trans-fast);
         }
-        .stream-live-badge:hover {
-            background: #334155;
-            transform: translateY(-1px);
-        }
+
         .stream-live-badge.active {
-            background: #7f1d1d;
-            border: 1px solid #dc2626;
-            color: #fca5a5;
-        }
-
-        .stream-close-btn {
-            width: 32px;
-            height: 32px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border: 1px solid var(--border-subtle);
-            border-radius: 50%;
-            background: #111723;
-            color: var(--text-secondary);
-            font-size: 15px;
-            cursor: pointer;
-            transition: transform var(--transition-smooth), background-color 0.15s, color 0.15s;
-        }
-
-        .stream-close-btn:hover {
-            background: #7f1d1d;
+            background: #ffffff;
             color: #ffffff;
-            border-color: #dc2626;
-            transform: scale(1.1);
-        }
-        .stream-close-btn:active {
-            transform: scale(0.95);
+            border-color: #ffffff;
+            font-weight: 800;
         }
 
         .stream-body {
             position: relative;
-            background: #05070a;
-            min-height: 280px;
+            background: #ffffff;
             display: flex;
             align-items: center;
             justify-content: center;
-            margin: 12px 18px;
-            border-radius: var(--radius-sm);
+            min-height: 380px;
+            max-height: 52vh;
             overflow: hidden;
-            border: 1px solid var(--border-subtle);
         }
 
         .hud-scanline {
@@ -760,354 +1622,394 @@
             left: 0;
             right: 0;
             height: 2px;
-            background: #00e5ff;
-            box-shadow: 0 0 10px #00e5ff;
-            opacity: 0.85;
-            pointer-events: none;
+            background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.9), transparent);
+            box-shadow: 0 0 12px rgba(0, 0, 0, 0.8);
             z-index: 10;
-            animation: scanHud 2.5s ease-in-out infinite alternate;
-        }
-
-        .stream-body img {
-            width: 100%;
-            max-height: 48vh;
-            object-fit: contain;
-            display: block;
-        }
-
-        .stream-body img.snapshot-mode {
-            opacity: 0.92;
+            animation: scanHud 3s linear infinite;
+            pointer-events: none;
         }
 
         .stream-loading {
             position: absolute;
-            inset: 0;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
             gap: 12px;
-            color: var(--text-muted);
-            font-size: 0.82rem;
+            color: var(--paper-muted);
             font-family: var(--font-mono);
+            font-size: 0.82rem;
+            z-index: 5;
+        }
+
+        .stream-loading.hidden {
+            display: none;
         }
 
         .stream-spinner {
             width: 32px;
             height: 32px;
-            border: 3px solid #1e293b;
-            border-top-color: var(--accent-cyan);
+            border: 2px solid rgba(0, 0, 0, 0.15);
+            border-top-color: var(--paper-pure);
             border-radius: 50%;
-            animation: spin 0.85s cubic-bezier(0.4, 0.1, 0.4, 1) infinite;
+            animation: spin 0.8s linear infinite;
         }
 
-        .stream-loading.hidden { display: none; }
+        #stream-img {
+            max-width: 100%;
+            max-height: 52vh;
+            object-fit: contain;
+            display: block;
+        }
 
-        /* In-Modal Real-Time Camera Detections */
         .camera-detections-section {
-            background: #090d14;
-            border-top: 1px solid var(--border-subtle);
+            background: rgba(235, 235, 240, 0.95);
+            border-top: 1px solid var(--border-glass);
             padding: 12px 18px;
-            max-height: 165px;
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 10px;
         }
+
         .cam-det-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
         }
+
         .cam-det-title {
-            font-size: 0.74rem;
-            font-weight: 700;
-            color: var(--text-secondary);
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .cam-det-count {
-            font-size: 0.68rem;
-            font-weight: 700;
-            padding: 2px 8px;
-            border-radius: var(--radius-full);
-            background: #1e293b;
-            border: 1px solid var(--border-subtle);
-            color: var(--accent-cyan);
             font-family: var(--font-mono);
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: var(--paper-muted);
         }
 
-        .sighting-badge {
-            font-size: 0.62rem;
-            padding: 1px 6px;
-            border-radius: var(--radius-full);
-            background: #1e293b;
-            border: 1px solid var(--border-subtle);
-            color: var(--accent-amber);
+        .cam-det-count {
             font-family: var(--font-mono);
-            font-weight: 700;
-            margin-left: 6px;
+            font-size: 0.72rem;
+            color: var(--paper-dim);
         }
+
         .cam-det-list {
             display: flex;
             gap: 10px;
             overflow-x: auto;
-            padding-bottom: 6px;
+            padding-bottom: 4px;
         }
-        .cam-det-list::-webkit-scrollbar {
-            height: 4px;
-        }
-        .cam-det-list::-webkit-scrollbar-thumb {
-            background: var(--border-active);
-            border-radius: var(--radius-full);
-        }
-        .cam-det-card {
-            flex: 0 0 auto;
-            background: #111723;
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-sm);
-            padding: 9px 13px;
+
+        .cam-det-empty {
+            color: var(--paper-dim);
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            padding: 8px 0;
             display: flex;
-            flex-direction: column;
-            gap: 4px;
-            min-width: 175px;
-            cursor: pointer;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-            animation: detCardPop 0.28s var(--transition-smooth) forwards;
-            transition: transform var(--transition-smooth), border-color 0.2s, background-color 0.2s;
+            align-items: center;
+            gap: 8px;
         }
+
+        .cam-det-card {
+            flex-shrink: 0;
+            padding: 8px 12px;
+            background: rgba(230, 230, 235, 0.8);
+            border: 1px solid var(--border-specular);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all var(--trans-fast);
+        }
+
         .cam-det-card:hover {
-            border-color: var(--border-active);
-            background: #161e2e;
+            background: rgba(32, 32, 40, 0.95);
+            border-color: rgba(0, 0, 0, 0.4);
             transform: translateY(-2px);
         }
+
         .cam-det-plate {
             font-family: var(--font-mono);
-            font-size: 1rem;
+            font-size: 0.96rem;
             font-weight: 800;
-            letter-spacing: 1.5px;
-            color: #ffffff;
+            color: var(--paper-pure);
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }
+
         .cam-det-meta {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            font-size: 0.7rem;
-        }
-        .cam-det-empty {
-            color: var(--text-muted);
-            font-size: 0.74rem;
-            padding: 12px 0;
-            text-align: center;
-            width: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            font-family: var(--font-mono);
+            gap: 10px;
+            font-size: 0.72rem;
+            margin-top: 4px;
         }
 
         .stream-footer {
-            padding: 9px 18px;
+            padding: 10px 18px;
+            background: rgba(8, 8, 12, 0.95);
             border-top: 1px solid var(--border-subtle);
-            background: var(--bg-panel);
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--paper-dim);
             display: flex;
             align-items: center;
             justify-content: space-between;
-            font-size: 0.7rem;
-            color: var(--text-muted);
-            font-family: var(--font-mono);
         }
 
-        /* ─────────────── Detail View Modal ─────────────── */
+        /* ── Detail View Modal ── */
         .detail-body {
-            padding: 20px;
-            background: var(--bg-secondary);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .detail-plate-lg {
+            font-family: var(--font-mono);
+            font-size: 2.1rem;
+            font-weight: 900;
+            color: var(--paper-pure);
+            letter-spacing: 3px;
+            text-align: center;
+            padding: 16px;
+            background: rgba(0, 0, 0, 0.05);
+            border: 1px solid var(--border-specular);
+            border-radius: var(--radius-md);
         }
 
         .detail-row {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 10px 0;
+            padding-bottom: 10px;
             border-bottom: 1px solid var(--border-subtle);
-        }
-        .detail-row:last-child {
-            border-bottom: none;
         }
 
         .detail-label {
-            font-size: 0.75rem;
-            color: var(--text-muted);
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            font-weight: 600;
+            letter-spacing: 0.8px;
+            color: var(--paper-muted);
         }
 
         .detail-value {
-            font-size: 0.9rem;
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-        
-        .detail-plate-lg {
-            font-family: var(--font-mono);
-            font-size: 1.7rem;
-            font-weight: 800;
-            letter-spacing: 2px;
-            color: #ffffff;
-            text-align: center;
-            margin-bottom: 16px;
-            padding: 14px;
-            background: #090d14;
-            border: 1px solid var(--border-active);
-            border-radius: var(--radius-md);
-            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+            font-family: var(--font-sans);
+            font-size: 0.90rem;
+            font-weight: 700;
+            color: var(--paper-primary);
         }
 
         .vehicle-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 4px 10px;
-            border-radius: var(--radius-full);
-            font-size: 0.75rem;
-            font-weight: 600;
-            background: #182232;
-            border: 1px solid var(--border-subtle);
+            font-family: var(--font-mono);
+            font-size: 0.74rem;
+            padding: 3px 8px;
+            background: rgba(0, 0, 0, 0.08);
+            border: 1px solid var(--border-specular);
+            border-radius: var(--radius-xs);
+            color: var(--paper-primary);
         }
 
-        /* ─────────────── Responsive ─────────────── */
+        /* ── Siren & Merge Banners (Paper & Ink High-Contrast Alerts) ── */
+        .banner-box {
+            position: relative;
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            border: 2px solid #ffffff;
+            background: rgba(240, 240, 245, 0.96);
+            backdrop-filter: var(--glass-blur);
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.35);
+        }
+
+        /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+           RESPONSIVE REFINEMENTS
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
         @media (max-width: 1024px) {
             .main {
                 grid-template-columns: 1fr;
-                max-height: none;
-                overflow: auto;
+                height: auto;
+                overflow: visible;
             }
-            .map-panel { min-height: 400px; }
-        }
-
-        @media (max-width: 640px) {
-            .stats-bar { flex-direction: column; }
-            .header { padding: 10px 14px; }
-            .main { padding: 10px 14px; }
+            .map-panel {
+                height: 480px;
+            }
+            .alerts-panel {
+                height: 450px;
+            }
+            .stats-bar {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .route-layout, .coverage-layout {
+                grid-template-columns: 1fr;
+            }
+            .route-summary-cards {
+                grid-template-columns: 1fr 1fr;
+            }
         }
     </style>
 </head>
 <body>
     <div class="app">
-        <!-- ─────── Header ─────── -->
+        <!-- ─────── Top Editorial Dateline Strip ─────── -->
+        <div class="editorial-dateline">
+            <div class="dateline-left">
+                <span class="dateline-pill">RESTRICTED // STATE GRID</span>
+                <span>SECTOR: GJ-07 (AHMEDABAD METRO)</span>
+                <span>RETICLE: 23.0225° N, 72.5714° E</span>
+            </div>
+            <div class="dateline-right">
+                <span>CHRONOMETER (UTC/IST):</span>
+                <span class="clock-live" id="live-chronometer">--:--:--</span>
+            </div>
+        </div>
+
+        <!-- ─────── Command Center Glass Header // Front-Page Masthead ─────── -->
         <header class="header">
-            <div class="header-left">
-                <div class="logo">S</div>
-                <div>
-                    <div class="brand">Sentinel</div>
-                    <div class="brand-sub">ANPR Command Center</div>
+            <div class="header-top">
+                <div class="header-brand">
+                    <div class="masthead-seal">S</div>
+                    <div class="brand-block">
+                        <div class="brand-title">
+                            Sentinel <span class="brand-vol">VOL. 24.1</span>
+                        </div>
+                        <div class="brand-kicker">AUTOMATIC NUMBER PLATE RECOGNITION // COMMAND MATRIX</div>
+                    </div>
+                </div>
+
+                <div class="header-controls">
+                    <!-- 🔒 API Key Bar -->
+                    <div class="api-key-box" id="api-key-bar">
+                        <div class="api-key-wrap">
+                            <span class="api-key-icon">KEY:</span>
+                            <input
+                                id="api-key-input"
+                                type="password"
+                                placeholder="Enter API Key..."
+                                autocomplete="off"
+                                class="api-key-input"
+                                onkeydown="if(event.key==='Enter') validateApiKey()"
+                            />
+                        </div>
+                        <button id="api-key-btn" class="btn-glass" onclick="validateApiKey()">Connect</button>
+                        <div id="api-key-badge" class="api-badge"></div>
+                    </div>
+
+                    <!-- WebSocket Pulse Badge -->
+                    <div class="connection-badge" id="ws-badge">
+                        <span class="pulse-dot"></span>
+                        <span id="ws-status-text">Connecting...</span>
+                    </div>
                 </div>
             </div>
-            <div class="header-right">
-                <!-- 🔒 API Key Bar -->
-                <div id="api-key-bar" style="display:flex;align-items:center;gap:8px;margin-right:12px;">
-                    <div style="position:relative;display:flex;align-items:center;">
-                        <span style="position:absolute;left:10px;font-size:14px;pointer-events:none;">🔑</span>
-                        <input
-                            id="api-key-input"
-                            type="password"
-                            placeholder="Enter API Key..."
-                            autocomplete="off"
-                            style="padding:6px 12px 6px 32px;background:#111723;border:1px solid #2f3c52;border-radius:8px;color:#f8fafc;font-family:'JetBrains Mono',monospace;font-size:12px;width:220px;outline:none;transition:border-color 0.2s;"
-                            onkeydown="if(event.key==='Enter') validateApiKey()"
-                            onfocus="this.style.borderColor='#0284c7'"
-                            onblur="this.style.borderColor='#2f3c52'"
-                        />
-                    </div>
-                    <button id="api-key-btn" onclick="validateApiKey()" style="padding:6px 14px;background:#0284c7;border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;" onmouseover="this.style.background='#0369a1'" onmouseout="this.style.background='#0284c7'">Connect</button>
-                    <div id="api-key-badge" style="display:none;align-items:center;gap:6px;padding:4px 10px;background:#0f3a1c;border:1px solid #10b981;border-radius:8px;font-size:11px;color:#10b981;font-weight:600;"></div>
-                </div>
+
+            <!-- Magazine Index Nav Tabs -->
+            <div class="header-nav-bar">
                 <nav class="main-nav" id="main-nav">
-                    <button class="nav-tab active" data-tab="dashboard" onclick="switchTab('dashboard')">📡 Dashboard</button>
-                    <button class="nav-tab" data-tab="route" onclick="switchTab('route')">🗺️ Route Tracker</button>
-                    <button class="nav-tab" data-tab="watchlist" onclick="switchTab('watchlist')">🔴 Watchlist</button>
-                    <button class="nav-tab" data-tab="evidence" onclick="switchTab('evidence')">📋 Evidence</button>
-                    <button class="nav-tab" data-tab="coverage" onclick="switchTab('coverage')">🛰️ Coverage</button>
-                    <button class="nav-tab" data-tab="tracks" onclick="switchTab('tracks')">🔄 Cross-Cam</button>
+                    <button class="nav-tab active" data-tab="dashboard" onclick="switchTab('dashboard')">
+                        <span class="tab-num">01.</span> DISPATCH &amp; GRID
+                    </button>
+                    <button class="nav-tab" data-tab="route" onclick="switchTab('route')">
+                        <span class="tab-num">02.</span> ROUTE RECON
+                    </button>
+                    <button class="nav-tab" data-tab="watchlist" onclick="switchTab('watchlist')">
+                        <span class="tab-num">03.</span> WATCHLIST
+                    </button>
+                    <button class="nav-tab" data-tab="evidence" onclick="switchTab('evidence')">
+                        <span class="tab-num">04.</span> EVIDENCE DOSSIER
+                    </button>
+                    <button class="nav-tab" data-tab="coverage" onclick="switchTab('coverage')">
+                        <span class="tab-num">05.</span> GIS COVERAGE
+                    </button>
+                    <button class="nav-tab" data-tab="tracks" onclick="switchTab('tracks')">
+                        <span class="tab-num">06.</span> CROSS-CAM
+                    </button>
                 </nav>
-                <div class="connection-badge" id="ws-badge">
-                    <span class="pulse-dot"></span>
-                    <span id="ws-status-text">Connecting...</span>
-                </div>
             </div>
         </header>
 
-        <!-- ─────── Main ─────── -->
+        <!-- ─────── Tab 01: Main Dashboard (Magazine Spread) ─────── -->
         <main class="main">
-            <!-- Stats Bar -->
+            <!-- Section 01: Fleet Vitals & Key Figures -->
             <div class="stats-bar">
                 <div class="stat-card">
                     <div class="stat-icon">📷</div>
                     <div class="stat-info">
+                        <span class="stat-figure-tag">FIG. 1.01</span>
                         <span class="stat-value" id="stat-cameras">—</span>
                         <span class="stat-label">Cameras Configured</span>
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-icon" style="color: var(--accent-cyan);">⚡</div>
+                    <div class="stat-icon">⚡</div>
                     <div class="stat-info">
+                        <span class="stat-figure-tag">FIG. 1.02</span>
                         <span class="stat-value" id="stat-extractions">0 / 2</span>
                         <span class="stat-label">Active Extractions</span>
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-icon" style="color: var(--accent-amber);">🚨</div>
+                    <div class="stat-icon">🚨</div>
                     <div class="stat-info">
+                        <span class="stat-figure-tag">FIG. 1.03</span>
                         <span class="stat-value" id="stat-alerts-today">—</span>
                         <span class="stat-label">Alerts Today</span>
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-icon" style="color: var(--accent-blue);">🔍</div>
+                    <div class="stat-icon">🔍</div>
                     <div class="stat-info">
+                        <span class="stat-figure-tag">FIG. 1.04</span>
                         <span class="stat-value" id="stat-plates">—</span>
                         <span class="stat-label">Unique Plates</span>
                     </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-icon" style="color: var(--accent-emerald);">📊</div>
+                    <div class="stat-icon">📊</div>
                     <div class="stat-info">
+                        <span class="stat-figure-tag">FIG. 1.05</span>
                         <span class="stat-value" id="stat-total">—</span>
                         <span class="stat-label">Total Detections</span>
                     </div>
                 </div>
             </div>
 
-            <!-- Map -->
+            <!-- Section 02: Tactical Radar Matrix (Map) -->
             <div class="map-panel">
                 <div class="panel-header">
-                    <div style="display: flex; align-items: center; gap: 12px;">
-                        <span class="panel-title">Live Camera Map</span>
+                    <div class="panel-title-wrap">
+                        <span class="section-tag">SEC. 02 //</span>
+                        <span class="panel-title">Tactical Surveillance Matrix</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <div class="map-layer-selector" style="display:flex;gap:4px;">
+                            <button class="layer-pill active" id="btn-layer-roadmap" onclick="switchMapLayer('roadmap')" title="Google Maps Tactical Dark">TACTICAL</button>
+                            <button class="layer-pill" id="btn-layer-satellite" onclick="switchMapLayer('satellite')" title="Google Maps Satellite">SATELLITE</button>
+                            <button class="layer-pill" id="btn-layer-hybrid" onclick="switchMapLayer('hybrid')" title="Google Maps Hybrid">HYBRID</button>
+                        </div>
                         <select id="quick-cam-select" class="quick-cam-select" onchange="onQuickSelectCamera(this)" title="Choose camera to stream and extract">
                             <option value="">⚡ Quick Select Camera...</option>
                         </select>
+                        <span class="panel-badge" id="camera-count-badge">0 cameras</span>
                     </div>
-                    <span class="panel-badge" id="camera-count-badge">0 cameras</span>
                 </div>
                 <div id="map"></div>
             </div>
 
-            <!-- Alerts Feed -->
+            <!-- Section 03: Wire Service Dispatches (Real-Time Alerts) -->
             <div class="alerts-panel">
                 <div class="panel-header">
-                    <span class="panel-title">Alert Feed</span>
-                    <span class="panel-badge" id="alert-live-badge" style="color: #34d399; background: #064e3b; border-color: #059669;">LIVE</span>
+                    <div class="panel-title-wrap">
+                        <span class="section-tag">SEC. 03 //</span>
+                        <span class="panel-title">Dispatch Wire Service</span>
+                    </div>
+                    <span class="panel-badge" id="alert-live-badge" style="background:#ffffff; color:#ffffff; font-weight:800;">LIVE</span>
                 </div>
                 <div class="search-bar">
                     <input
                         type="text"
                         class="search-input"
                         id="plate-search"
-                        placeholder="Search plate number (e.g. GJ01)..."
+                        placeholder="Search dispatch wire (e.g. GJ01)..."
                     >
                 </div>
                 <div class="alerts-list" id="alerts-list">
@@ -1120,11 +2022,11 @@
             </div>
         </main>
 
-        <!-- ─────── Route Tracker Panel ─────── -->
+        <!-- ─────── Tab 02: Route Tracker Panel ─────── -->
         <section class="feature-panel" id="panel-route" style="display:none;">
             <div class="feature-panel-header">
                 <h2 class="feature-panel-title">🗺️ Vehicle Route Reconstruction</h2>
-                <p class="feature-panel-sub">Enter a plate number to reconstruct its complete chronological journey across the statewide camera grid.</p>
+                <p class="feature-panel-sub">Enter a license plate to reconstruct its complete chronological trajectory and velocity profile across the statewide grid.</p>
             </div>
             <div class="route-search-bar">
                 <input type="text" id="route-plate-input" class="route-plate-input" placeholder="e.g. GJ01AB1234" maxlength="12">
@@ -1138,18 +2040,18 @@
                 </div>
             </div>
             <div id="route-empty" class="feature-empty">
-                <div style="font-size:3rem;">🚗</div>
-                <div class="empty-title">No route loaded</div>
-                <div class="empty-desc">Enter a license plate above to reconstruct its journey</div>
+                <div style="font-size:3rem; margin-bottom:8px;">🚗</div>
+                <div class="empty-title">No trajectory loaded</div>
+                <div class="empty-desc">Enter a license plate number above to reconstruct its journey</div>
             </div>
         </section>
 
-        <!-- ─────── Watchlist Panel ─────── -->
+        <!-- ─────── Tab 03: Watchlist Panel ─────── -->
         <section class="feature-panel" id="panel-watchlist" style="display:none;">
             <div class="feature-panel-header" style="display:flex; justify-content:space-between; align-items:flex-start;">
                 <div>
                     <h2 class="feature-panel-title">🔴 Target Vehicle Watchlist</h2>
-                    <p class="feature-panel-sub">Cross-referenced in real-time via in-memory cache. Fuzzy OCR matching enabled.</p>
+                    <p class="feature-panel-sub">Cross-referenced in real-time via in-memory cache. Positional fuzzy OCR matching enabled.</p>
                 </div>
                 <button class="btn-primary" onclick="openAddTargetModal()">+ Add Target</button>
             </div>
@@ -1163,11 +2065,11 @@
             </div>
         </section>
 
-        <!-- ─────── Evidence Dossier Panel ─────── -->
+        <!-- ─────── Tab 04: Evidence Dossier Panel ─────── -->
         <section class="feature-panel" id="panel-evidence" style="display:none;">
             <div class="feature-panel-header">
                 <h2 class="feature-panel-title">📋 Section 65B Evidence Dossier</h2>
-                <p class="feature-panel-sub">Generate a court-admissible PDF with SHA-256 cryptographic hashes for each snapshot.</p>
+                <p class="feature-panel-sub">Generate a certified, court-admissible forensic PDF dossier with SHA-256 cryptographic hashes for each sighting snapshot.</p>
             </div>
             <div class="evidence-form">
                 <div class="form-group">
@@ -1188,39 +2090,42 @@
                     <label class="form-label">Authorized Operator Name</label>
                     <input type="text" id="ev-operator" class="form-input" placeholder="e.g. Inspector R. Sharma">
                 </div>
-                <button class="btn-primary" id="ev-generate-btn" onclick="generateEvidence()" style="width:100%; padding: 14px; font-size:1rem; margin-top:8px;">
+                <button class="btn-primary" id="ev-generate-btn" onclick="generateEvidence()" style="width:100%; padding: 14px; font-size:0.92rem; margin-top:8px;">
                     Generate Certified Dossier (PDF)
                 </button>
-                <div id="ev-status" style="margin-top:12px; font-size:0.85rem; color: var(--text-muted); text-align:center;"></div>
+                <div id="ev-status" style="margin-top:12px; font-size:0.85rem; color: var(--paper-muted); text-align:center;"></div>
             </div>
         </section>
 
-        <!-- ─────── Coverage Map Panel ─────── -->
+        <!-- ─────── Tab 05: Coverage Map Panel ─────── -->
         <section class="feature-panel" id="panel-coverage" style="display:none;">
             <div class="feature-panel-header">
                 <h2 class="feature-panel-title">🛰️ GIS Coverage Gap Analysis</h2>
-                <p class="feature-panel-sub">Green circles = 150m coverage radius. Red markers = blind spots. Amber pins = recommended deployments.</p>
+                <p class="feature-panel-sub">Surveillance network density analysis. Circles = 150m coverage radius. Red markers = blind spots. Amber pins = recommended deployments.</p>
             </div>
             <div class="coverage-layout">
-                <div id="coverage-map" class="route-map-container" style="height:500px;"></div>
+                <div id="coverage-map" class="route-map-container" style="height:520px;"></div>
                 <div class="coverage-stats" id="coverage-stats">
-                    <div class="stat-card" style="background: var(--bg-card); border: 1px solid var(--border-subtle); padding:16px; border-radius:12px;">
-                        <div class="stat-icon" style="color:var(--accent-emerald);">🛰️</div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🛰️</div>
                         <div class="stat-info">
+                            <span class="stat-figure-tag">METRIC 1</span>
                             <span class="stat-value" id="cov-area">—</span>
                             <span class="stat-label">km² Covered</span>
                         </div>
                     </div>
-                    <div class="stat-card" style="background: var(--bg-card); border: 1px solid var(--border-subtle); padding:16px; border-radius:12px;">
-                        <div class="stat-icon" style="color:var(--accent-rose);">⚠️</div>
+                    <div class="stat-card">
+                        <div class="stat-icon">⚠️</div>
                         <div class="stat-info">
+                            <span class="stat-figure-tag">METRIC 2</span>
                             <span class="stat-value" id="cov-gaps">—</span>
                             <span class="stat-label">Critical Gaps</span>
                         </div>
                     </div>
-                    <div class="stat-card" style="background: var(--bg-card); border: 1px solid var(--border-subtle); padding:16px; border-radius:12px;">
-                        <div class="stat-icon" style="color:var(--accent-amber);">📍</div>
+                    <div class="stat-card">
+                        <div class="stat-icon">📍</div>
                         <div class="stat-info">
+                            <span class="stat-figure-tag">METRIC 3</span>
                             <span class="stat-value" id="cov-recs">—</span>
                             <span class="stat-label">Suggested Nodes</span>
                         </div>
@@ -1230,27 +2135,46 @@
             </div>
         </section>
 
+        <!-- ─────── Tab 06: Cross-Cam Anonymous Tracking Panel ─────── -->
+        <section class="feature-panel" id="panel-tracks" style="display:none;">
+            <div class="feature-panel-header" style="display:flex; justify-content:space-between; align-items:flex-start;">
+                <div>
+                    <h2 class="feature-panel-title">🔄 Cross-Camera Identity Resolution</h2>
+                    <p class="feature-panel-sub">Real-time anonymous vehicle signatures retroactively merged upon definitive license plate capture across cameras.</p>
+                </div>
+                <button class="btn-secondary" onclick="loadAnonymousTracks()">⟳ Refresh Tracks</button>
+            </div>
+            <div class="watchlist-table-wrap">
+                <table class="watchlist-table">
+                    <thead><tr>
+                        <th>Anonymous Track ID</th><th>Origin Camera</th><th>Profile (Type / Color)</th><th>First Seen</th><th>Resolution Status</th>
+                    </tr></thead>
+                    <tbody id="tracks-tbody"><tr><td colspan="5" class="table-empty">Loading anonymous vehicle tracks...</td></tr></tbody>
+                </table>
+            </div>
+        </section>
+
         <!-- ─────── Add Target Modal ─────── -->
-        <div class="stream-overlay" id="add-target-overlay" onclick="closeAddTargetModal(event)" style="display:none;">
-            <div class="stream-modal" style="max-width:420px;" onclick="event.stopPropagation()">
+        <div class="stream-overlay" id="add-target-overlay" onclick="closeAddTargetModal(event)">
+            <div class="stream-modal" style="max-width:440px;" onclick="event.stopPropagation()">
                 <div class="stream-modal-header">
                     <div class="stream-modal-title"><h3>Add Target Vehicle</h3></div>
                     <button class="stream-close-btn" onclick="closeAddTargetModal()">✕</button>
                 </div>
-                <div style="padding:20px; display:flex; flex-direction:column; gap:14px;">
+                <div style="padding:22px; display:flex; flex-direction:column; gap:14px;">
                     <div class="form-group">
-                        <label class="form-label">License Plate</label>
+                        <label class="form-label">License Plate Number</label>
                         <input type="text" id="wl-plate" class="form-input" placeholder="e.g. GJ01AB1234" maxlength="12">
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Reason</label>
+                        <label class="form-label">Interception Reason</label>
                         <input type="text" id="wl-reason" class="form-input" placeholder="e.g. Stolen Vehicle, Amber Alert">
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Priority</label>
+                        <label class="form-label">Priority Classification</label>
                         <select id="wl-priority" class="form-input">
                             <option value="critical">CRITICAL — Immediate Intercept</option>
-                            <option value="high" selected>HIGH — Observe & Report</option>
+                            <option value="high" selected>HIGH — Observe &amp; Report</option>
                             <option value="medium">MEDIUM — Intelligence Gathering</option>
                         </select>
                     </div>
@@ -1262,38 +2186,37 @@
             </div>
         </div>
 
-        <!-- ─────── Watchlist Siren Alert ─────── -->
-        <!-- ─────── Anonymous Merge Alert ─────── -->
-        <div id="merge-banner" style="display:none; position:fixed; top:20px; left:50%; transform:translateX(-50%); z-index:9998; width:min(700px,96vw); animation: modalPopIn 0.3s ease-out;">
-            <div id="merge-inner" style="position:relative; border-radius:14px; overflow:hidden; border:2px solid #3b82f6; background:rgba(30,58,138,0.97); backdrop-filter:blur(12px); box-shadow: 0 0 60px rgba(59,130,246,0.4);">
-                <div style="position:absolute;inset:0;background:#3b82f6;opacity:0.08;animation:pulseGlow 1.2s infinite;"></div>
-                <div style="position:relative; padding:18px 22px; display:flex; gap:16px; align-items:flex-start;">
-                    <div style="flex-shrink:0; width:44px; height:44px; border-radius:50%; background:#1e3a8a; border:2px solid #3b82f6; display:flex; align-items:center; justify-content:center; font-size:1.4rem;">🔄</div>
+        <!-- ─────── Watchlist Siren Alert (Paper & Ink High-Contrast) ─────── -->
+        <div id="siren-banner" style="display:none; position:fixed; top:24px; left:50%; transform:translateX(-50%); z-index:9999; width:min(720px,96vw); animation: modalPopIn 0.3s ease-out;">
+            <div class="banner-box" style="border-color:#ffffff; box-shadow:0 0 60px rgba(0,0,0,0.45);">
+                <div style="padding:20px 24px; display:flex; gap:18px; align-items:flex-start;">
+                    <div style="flex-shrink:0; width:46px; height:46px; border-radius:50%; background:#ffffff; color:#ffffff; display:flex; align-items:center; justify-content:center; font-size:1.4rem; font-weight:900;">🚨</div>
                     <div style="flex:1;">
-                        <div style="font-size:0.7rem; font-weight:800; letter-spacing:2px; text-transform:uppercase; color:#93c5fd; margin-bottom:4px;">CROSS-CAMERA IDENTITY RESOLVED</div>
-                        <div id="merge-plate" style="font-family:var(--font-mono); font-size:1.4rem; font-weight:700; color:#fff; margin-bottom:8px;">—</div>
-                        <div id="merge-body" style="font-size:0.82rem; color:#bfdbfe; line-height:1.6;">—</div>
+                        <div style="font-family:var(--font-mono); font-size:0.72rem; font-weight:800; letter-spacing:2px; text-transform:uppercase; color:#ffffff; margin-bottom:4px;">WATCHLIST TARGET INTERCEPT DETECTED</div>
+                        <div id="siren-plate" style="font-family:var(--font-mono); font-size:1.45rem; font-weight:800; color:#ffffff; margin-bottom:6px;">—</div>
+                        <div id="siren-body" style="font-size:0.84rem; color:var(--paper-secondary); line-height:1.6;">—</div>
                     </div>
-                    <button onclick="closeMergeBanner()" style="flex-shrink:0; background:none; border:none; color:#93c5fd; font-size:1.2rem; cursor:pointer; padding:4px;">✕</button>
-                </div>
-            </div>
-        </div>
-        <div id="siren-banner" style="display:none; position:fixed; top:20px; left:50%; transform:translateX(-50%); z-index:9999; width:min(700px,96vw); animation: modalPopIn 0.3s ease-out;">
-            <div id="siren-inner" style="position:relative; border-radius:14px; overflow:hidden; border:2px solid #ef4444; background:rgba(127,29,29,0.97); backdrop-filter:blur(12px); box-shadow: 0 0 60px rgba(239,68,68,0.4);">
-                <div style="position:absolute;inset:0;background:#ef4444;opacity:0.08;animation:pulseGlow 1.2s infinite;"></div>
-                <div style="position:relative; padding:18px 22px; display:flex; gap:16px; align-items:flex-start;">
-                    <div style="flex-shrink:0; width:44px; height:44px; border-radius:50%; background:#991b1b; border:2px solid #ef4444; display:flex; align-items:center; justify-content:center; font-size:1.4rem;">🚨</div>
-                    <div style="flex:1;">
-                        <div style="font-size:0.7rem; font-weight:800; letter-spacing:2px; text-transform:uppercase; color:#fca5a5; margin-bottom:4px;">🔴 WATCHLIST MATCH DETECTED</div>
-                        <div id="siren-plate" style="font-family:var(--font-mono); font-size:1.4rem; font-weight:700; color:#fff; margin-bottom:8px;">—</div>
-                        <div id="siren-body" style="font-size:0.82rem; color:#fecaca; line-height:1.6;">—</div>
-                    </div>
-                    <button onclick="closeSiren()" style="flex-shrink:0; background:none; border:none; color:#fca5a5; font-size:1.2rem; cursor:pointer; padding:4px;">✕</button>
+                    <button onclick="closeSiren()" style="flex-shrink:0; background:none; border:none; color:#ffffff; font-size:1.3rem; cursor:pointer; padding:4px;">✕</button>
                 </div>
             </div>
         </div>
 
-        <!-- ─────── Live Stream Modal ─────── -->
+        <!-- ─────── Anonymous Merge Alert ─────── -->
+        <div id="merge-banner" style="display:none; position:fixed; top:24px; left:50%; transform:translateX(-50%); z-index:9998; width:min(720px,96vw); animation: modalPopIn 0.3s ease-out;">
+            <div class="banner-box" style="border-color:rgba(0,0,0,0.6); box-shadow:0 0 60px rgba(0,0,0,0.25);">
+                <div style="padding:20px 24px; display:flex; gap:18px; align-items:flex-start;">
+                    <div style="flex-shrink:0; width:46px; height:46px; border-radius:50%; background:rgba(0,0,0,0.1); border:1px solid #fff; display:flex; align-items:center; justify-content:center; font-size:1.4rem;">🔄</div>
+                    <div style="flex:1;">
+                        <div style="font-family:var(--font-mono); font-size:0.72rem; font-weight:800; letter-spacing:2px; text-transform:uppercase; color:var(--paper-secondary); margin-bottom:4px;">CROSS-CAMERA IDENTITY RESOLVED</div>
+                        <div id="merge-plate" style="font-family:var(--font-mono); font-size:1.45rem; font-weight:800; color:#fff; margin-bottom:6px;">—</div>
+                        <div id="merge-body" style="font-size:0.84rem; color:var(--paper-muted); line-height:1.6;">—</div>
+                    </div>
+                    <button onclick="closeMergeBanner()" style="flex-shrink:0; background:none; border:none; color:var(--paper-secondary); font-size:1.3rem; cursor:pointer; padding:4px;">✕</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ─────── Live Stream & Extraction Modal ─────── -->
         <div class="stream-overlay" id="stream-overlay" onclick="closeStreamModal(event)">
             <div class="stream-modal" onclick="event.stopPropagation()">
                 <div class="stream-modal-header">
@@ -1306,7 +2229,7 @@
                             <span class="extract-dot"></span>
                             <span id="modal-extract-text">AI Extracting</span>
                         </button>
-                        <button class="stream-live-badge" id="modal-live-toggle" onclick="toggleLiveStream()" title="Toggle live MJPEG stream (resource-intensive)">
+                        <button class="stream-live-badge" id="modal-live-toggle" onclick="toggleLiveStream()" title="Toggle live stream">
                             <span class="pulse-dot" id="live-toggle-dot"></span>
                             <span id="live-toggle-text">LIVE OFF</span>
                         </button>
@@ -1320,7 +2243,7 @@
                         Connecting to camera feed…
                     </div>
                     <img id="stream-img" alt="Live feed" style="display: none;">
-                    <video id="stream-video" autoplay muted playsinline crossorigin="use-credentials" style="display: none; width: 100%; max-height: 48vh; object-fit: contain;"></video>
+                    <video id="stream-video" autoplay muted playsinline crossorigin="use-credentials" style="display: none; width: 100%; max-height: 52vh; object-fit: contain;"></video>
                 </div>
                 <!-- In-Modal Real-Time Camera Detections -->
                 <div class="camera-detections-section">
@@ -1335,15 +2258,15 @@
                     </div>
                 </div>
                 <div class="stream-footer">
-                    <span id="stream-footer-text">Snapshot Preview · Tap LIVE for full MJPEG stream</span>
-                    <span>Press <kbd style="padding: 1px 4px; border: 1px solid var(--border-subtle); border-radius: 2px; font-family: var(--font-mono);">Esc</kbd> to close</span>
+                    <span id="stream-footer-text">Snapshot Preview · Tap LIVE for direct stream</span>
+                    <span>Press <kbd style="padding: 1px 5px; border: 1px solid var(--border-specular); border-radius: 3px; font-family: var(--font-mono);">Esc</kbd> to close</span>
                 </div>
             </div>
         </div>
 
-        <!-- ─────── Detail View Modal ─────── -->
+        <!-- ─────── Forensic Detail View Modal ─────── -->
         <div class="stream-overlay" id="detail-overlay" onclick="closeDetailModal(event)">
-            <div class="stream-modal" style="max-width: 480px;" onclick="event.stopPropagation()">
+            <div class="stream-modal" style="max-width: 490px;" onclick="event.stopPropagation()">
                 <div class="stream-modal-header">
                     <div class="stream-modal-title">
                         <h3>Detection Details</h3>
@@ -1365,7 +2288,7 @@
                         <span class="detail-label">Location</span>
                         <div style="text-align: right;">
                             <div class="detail-value" id="detail-area">—</div>
-                            <div style="font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted);" id="detail-cam">—</div>
+                            <div style="font-family: var(--font-mono); font-size: 0.70rem; color: var(--paper-muted);" id="detail-cam">—</div>
                         </div>
                     </div>
                     <div class="detail-row">
@@ -1383,43 +2306,54 @@
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-    <!-- HLS.js for direct dashboard video -->
+    <!-- Google Maps JS SDK with API Key -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDoDbelJVou8FvVzwBkFlWhyPq1uXCELk4&libraries=geometry"></script>
+
+    <!-- Leaflet Google Mutant Plugin -->
+    <script src="https://unpkg.com/leaflet.gridlayer.googlemutant@latest/dist/Leaflet.GoogleMutant.js"></script>
+
+    <!-- HLS.js for direct video -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
 
     <script>
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // Configuration
+    // Configuration & State
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-    const API_BASE = '';  // same origin
+    const API_BASE = '';
     const WS_URL = `ws://${location.host}/ws/alerts`;
     const POLL_INTERVAL_MS = 10000;
     const MAX_ALERTS_DISPLAY = 200;
-
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // State
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     let map, cameraMarkers = {}, alertsList = [];
     let ws = null, wsRetries = 0;
     let currentModalCameraId = null;
     let currentModalExtracting = true;
-    let currentModalLiveStream = false;  // default: snapshot mode (lightweight)
+    let currentModalLiveStream = false;
     let modalDetections = [];
     let _snapshotRefreshInterval = null;
-    // ────────────────────────────────────────────────────────────
-    // RBAC — API Key State and Helper
-    // ────────────────────────────────────────────────────────────
-
     let _apiKey = localStorage.getItem('sentinel_api_key') || '';
 
-    // Central fetch wrapper — injects X-API-Key on every request
+    // Central fetch wrapper with X-API-Key injection
     async function apiFetch(url, options = {}) {
         const headers = { ...(options.headers || {}) };
         if (_apiKey) headers['X-API-Key'] = _apiKey;
         return fetch(url, { ...options, headers });
     }
 
+    // Chronometer clock in editorial header
+    function updateChronometer() {
+        const now = new Date();
+        const utcStr = now.toISOString().slice(11, 19) + ' UTC';
+        const istStr = now.toLocaleTimeString('en-IN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' IST';
+        const el = document.getElementById('live-chronometer');
+        if (el) el.textContent = `${istStr} [${utcStr}]`;
+    }
+    setInterval(updateChronometer, 1000);
+    updateChronometer();
+
+    // ────────────────────────────────────────────────────────────
+    // RBAC — API Key Authentication
+    // ────────────────────────────────────────────────────────────
     async function validateApiKey() {
         const input = document.getElementById('api-key-input');
         const btn = document.getElementById('api-key-btn');
@@ -1441,22 +2375,59 @@
                 badge.innerHTML = 'Connected: ' + data.role.toUpperCase() + ' | ' + deptLabel;
                 fetchCameras(); fetchStats(); fetchAlerts();
             } else {
-                input.style.borderColor = '#ef4444';
+                input.style.borderColor = '#ffffff';
                 input.value = '';
                 input.placeholder = 'Invalid key — try again';
-                setTimeout(() => { input.style.borderColor = '#2f3c52'; input.placeholder = 'Enter API Key...'; }, 2500);
+                setTimeout(() => { input.style.borderColor = 'var(--border-specular)'; input.placeholder = 'Enter API Key...'; }, 2500);
             }
         } catch(e) { console.error('Key validation error:', e); }
         finally { btn.textContent = 'Connect'; btn.disabled = false; }
     }
 
-    // Auto-validate stored key on page load
-    if (_apiKey) { document.getElementById('api-key-input').value = _apiKey; setTimeout(validateApiKey, 800); }
-
+    if (_apiKey) {
+        document.getElementById('api-key-input').value = _apiKey;
+        setTimeout(validateApiKey, 800);
+    }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // Map initialization
+    // Map initialization (Google Maps with Tactical Command Center Styling)
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    const GOOGLE_TACTICAL_STYLES = [
+        { "elementType": "labels", "stylers": [{ "visibility": "off" }] },
+        { "featureType": "administrative", "elementType": "geometry", "stylers": [{ "visibility": "off" }] },
+        { "featureType": "poi", "stylers": [{ "visibility": "off" }] },
+        { "featureType": "road", "stylers": [{ "visibility": "off" }] },
+        { "featureType": "transit", "stylers": [{ "visibility": "off" }] },
+        { "featureType": "water", "stylers": [{ "visibility": "off" }] },
+        { "featureType": "landscape", "stylers": [{ "color": "#f5f5f7" }] } 
+    ];
+
+    let currentGoogleLayer = null;
+    let currentGoogleLayerType = 'roadmap';
+
+    function createGoogleMapLayer(type = 'roadmap') {
+        if (typeof L.gridLayer.googleMutant === 'function') {
+            const options = { type: type, maxZoom: 20 };
+            if (type === 'roadmap') {
+                options.styles = GOOGLE_TACTICAL_STYLES;
+            }
+            return L.gridLayer.googleMutant(options);
+        }
+        return L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 });
+    }
+
+    function switchMapLayer(type) {
+        currentGoogleLayerType = type;
+        if (map && currentGoogleLayer) {
+            map.removeLayer(currentGoogleLayer);
+            currentGoogleLayer = createGoogleMapLayer(type);
+            currentGoogleLayer.addTo(map);
+        }
+        ['roadmap', 'satellite', 'hybrid'].forEach(t => {
+            const btn = document.getElementById('btn-layer-' + t);
+            if (btn) btn.classList.toggle('active', t === type);
+        });
+    }
 
     function initMap() {
         map = L.map('map', {
@@ -1464,39 +2435,44 @@
             attributionControl: false,
         }).setView([23.025, 72.55], 13);
 
-        // Dark clean tactical tile layer
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            maxZoom: 19,
-        }).addTo(map);
+        currentGoogleLayer = createGoogleMapLayer(currentGoogleLayerType);
+        currentGoogleLayer.addTo(map);
     }
 
-    // Solid-color, ergonomic rounded camera pins with radar pulse animation
+    // Monochromatic Paper & Ink Camera Icons
     function createCameraIcon(status) {
-        const colors = {
-            extracting:   '#00e5ff',
-            streaming:    '#10b981',
-            connected:    '#38bdf8',
-            reconnecting: '#f59e0b',
-            idle:         '#64748b',
-            unknown:      '#475569',
-            offline:      '#ef4444',
-        };
-        const color = colors[status] || colors.idle;
         const isExtracting = (status === 'extracting');
+        let bg = '#e5e5eb';
+        let border = '#c0c0c5';
+        let fg = '#101015';
+
+        if (isExtracting) {
+            bg = '#ffffff';
+            border = '#ffffff';
+            fg = '#ffffff';
+        } else if (status === 'streaming') {
+            bg = '#e0e0e5';
+            border = '#707075';
+            fg = '#ffffff';
+        } else if (status === 'offline') {
+            bg = '#101015';
+            border = '#d0d0d5';
+            fg = '#a0a0a5';
+        }
 
         return L.divIcon({
             className: 'camera-marker',
             html: `
-                <div class="camera-marker-pin" style="background: ${color}; border-color: ${isExtracting ? '#ffffff' : '#080b11'};">
+                <div class="camera-marker-pin" style="background: ${bg}; border-color: ${border};">
                     ${isExtracting ? '<div class="camera-marker-radar"></div>' : ''}
-                    <span style="color: ${isExtracting ? '#000000' : '#ffffff'}; font-size: ${isExtracting ? '13px' : '11px'}; font-weight: 800; position: relative; z-index: 2;">
+                    <span style="color: ${fg}; font-size: ${isExtracting ? '12px' : '10px'}; font-weight: 800; position: relative; z-index: 2;">
                         ${isExtracting ? '⚡' : '📷'}
                     </span>
                 </div>
             `,
-            iconSize: [32, 32],
-            iconAnchor: [16, 16],
-            popupAnchor: [0, -16],
+            iconSize: [28, 28],
+            iconAnchor: [14, 14],
+            popupAnchor: [0, -14],
         });
     }
 
@@ -1534,7 +2510,7 @@
                     ${isExtracting ? '⚡ AI EXTRACTING' : (cam.status || 'IDLE')}
                 </span>
                 <br>
-                <button class="popup-stream-btn" onclick="openStreamModal('${cam.camera_id}', '${(cam.camera_name || 'Camera').replace(/'/g, "\\'")}')">▶ View Live Feed & Extract</button>
+                <button class="popup-stream-btn" onclick="openStreamModal('${cam.camera_id}', '${(cam.camera_name || 'Camera').replace(/'/g, "\\'")}')">▶ View Live Feed &amp; Extract</button>
             `;
 
             if (cameraMarkers[cam.camera_id]) {
@@ -1550,14 +2526,12 @@
             }
         });
 
-        document.getElementById('camera-count-badge').textContent =
-            `${cameras.length} cameras`;
+        document.getElementById('camera-count-badge').textContent = `${cameras.length} cameras`;
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // Alerts rendering
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
     function formatTime(isoStr) {
         if (!isoStr) return '—';
         const d = new Date(isoStr);
@@ -1625,7 +2599,6 @@
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // Data fetching
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
     async function fetchStats() {
         try {
             const res = await apiFetch(`${API_BASE}/api/stats`);
@@ -1667,7 +2640,6 @@
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // WebSocket — Real-Time Alert Stream
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
     let _wsPingInterval = null;
 
     function connectWebSocket() {
@@ -1678,6 +2650,7 @@
 
         try {
             ws = new WebSocket(WS_URL);
+            window._sentinelWS = ws;
         } catch (e) {
             badge.classList.add('disconnected');
             statusText.textContent = 'WS Unavailable';
@@ -1697,7 +2670,6 @@
                     renderAlerts(data.alerts, true);
                     fetchStats();
 
-                    // If modal is open for a camera, route matching detection to modal feed
                     if (currentModalCameraId) {
                         const matching = data.alerts.filter(a => a.camera_id === currentModalCameraId);
                         if (matching.length > 0) {
@@ -1737,12 +2709,8 @@
         }, 30000);
     }
 
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // Search handler
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
     let searchDebounceTimeout = null;
-
     document.getElementById('plate-search').addEventListener('input', (e) => {
         clearTimeout(searchDebounceTimeout);
         const query = e.target.value.trim();
@@ -1778,11 +2746,10 @@
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // Live Stream Modal & Dynamic On-Demand Extraction
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
     async function openStreamModal(cameraId, cameraName) {
         currentModalCameraId = cameraId;
         currentModalExtracting = true;
-        currentModalLiveStream = false;  // Always start in snapshot (lightweight) mode
+        currentModalLiveStream = false;
         modalDetections = [];
 
         const overlay = document.getElementById('stream-overlay');
@@ -1806,14 +2773,12 @@
         if (detList) detList.innerHTML = '<div class="cam-det-empty"><span>📡</span> Scanning video stream for vehicles and plates...</div>';
         if (scanline) scanline.style.display = 'block';
 
-        // Reset live stream toggle to OFF (snapshot mode)
         if (liveToggle) liveToggle.className = 'stream-live-badge';
         if (liveToggleText) liveToggleText.textContent = 'LIVE OFF';
-        if (footerText) footerText.textContent = 'Snapshot Preview · Tap LIVE for full MJPEG stream';
+        if (footerText) footerText.textContent = 'Snapshot Preview · Tap LIVE for direct stream';
 
         overlay.classList.add('active');
 
-        // Start in SNAPSHOT mode — load a single JPEG thumbnail
         img.onload = function() {
             loading.classList.add('hidden');
             img.style.display = 'block';
@@ -1823,7 +2788,7 @@
                 loading.innerHTML = `
                     <div style="font-size: 32px; margin-bottom: 8px;">📡</div>
                     Buffering feed from ${cameraId}...
-                    <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">
+                    <div style="font-size: 0.72rem; color: var(--paper-muted); margin-top: 4px;">
                         Acquiring video stream
                     </div>
                 `;
@@ -1831,12 +2796,10 @@
             }
         };
 
-        // Load single snapshot (lightweight — not a continuous stream)
         img.style.display = 'block';
         img.classList.add('snapshot-mode');
         img.src = `${API_BASE}/api/cameras/${cameraId}/snapshot?t=${Date.now()}`;
 
-        // Refresh snapshot every 3 seconds while in snapshot mode
         if (_snapshotRefreshInterval) clearInterval(_snapshotRefreshInterval);
         _snapshotRefreshInterval = setInterval(() => {
             if (currentModalCameraId === cameraId && !currentModalLiveStream) {
@@ -1844,7 +2807,6 @@
             }
         }, 3000);
 
-        // Safety fallback timer
         if (window._streamSafetyTimeout) clearTimeout(window._streamSafetyTimeout);
         window._streamSafetyTimeout = setTimeout(() => {
             if (overlay.classList.contains('active')) {
@@ -1853,7 +2815,6 @@
             }
         }, 300);
 
-        // Dynamically start AI extraction on this specific camera on-demand!
         fetch(`${API_BASE}/api/cameras/${cameraId}/extract/start`, { method: 'POST' })
             .then(res => res.json())
             .then(() => {
@@ -1862,14 +2823,12 @@
             })
             .catch(e => console.warn('Failed to activate extraction:', e));
 
-        // Function to refresh detections for this camera
         async function refreshModalDetections() {
             if (!currentModalCameraId || currentModalCameraId !== cameraId) return;
             try {
                 const res = await fetch(`${API_BASE}/api/cameras/${cameraId}/alerts?limit=15`);
                 const data = await res.json();
                 if (data.alerts && data.alerts.length > 0) {
-                    // Deduplicate by plate_number — keep best confidence per plate
                     const plateMap = new Map();
                     data.alerts.forEach(a => {
                         const existing = plateMap.get(a.plate_number);
@@ -1885,10 +2844,7 @@
             }
         }
 
-        // Fetch initial alerts immediately
         refreshModalDetections();
-
-        // Continuous polling while modal is open (every 1.5s)
         if (window._modalPollInterval) clearInterval(window._modalPollInterval);
         window._modalPollInterval = setInterval(refreshModalDetections, 1500);
     }
@@ -1899,14 +2855,10 @@
         const video = document.getElementById('stream-video');
         const liveToggle = document.getElementById('modal-live-toggle');
         const liveToggleText = document.getElementById('live-toggle-text');
-        const liveDot = document.getElementById('live-toggle-dot');
         const footerText = document.getElementById('stream-footer-text');
 
         if (currentModalLiveStream) {
-            // Switch to snapshot mode (lightweight)
             currentModalLiveStream = false;
-            
-            // Stop HLS video
             video.style.display = 'none';
             video.pause();
             if (window.hls) {
@@ -1915,15 +2867,14 @@
             }
             video.src = '';
             
-            img.src = '';  // disconnect MJPEG stream
+            img.src = '';
             img.style.display = 'block';
             img.classList.add('snapshot-mode');
             img.src = `${API_BASE}/api/cameras/${currentModalCameraId}/snapshot?t=${Date.now()}`;
             if (liveToggle) liveToggle.className = 'stream-live-badge';
             if (liveToggleText) liveToggleText.textContent = 'LIVE OFF';
-            if (footerText) footerText.textContent = 'Snapshot Preview · Tap LIVE for direct HLS stream';
+            if (footerText) footerText.textContent = 'Snapshot Preview · Tap LIVE for direct stream';
 
-            // Restart snapshot refresh
             if (_snapshotRefreshInterval) clearInterval(_snapshotRefreshInterval);
             _snapshotRefreshInterval = setInterval(() => {
                 if (currentModalCameraId && !currentModalLiveStream) {
@@ -1931,7 +2882,6 @@
                 }
             }, 3000);
         } else {
-            // Switch to full HLS live stream directly from CDN
             currentModalLiveStream = true;
             if (_snapshotRefreshInterval) {
                 clearInterval(_snapshotRefreshInterval);
@@ -1945,8 +2895,8 @@
             if (Hls.isSupported()) {
                 const hls = new Hls({
                     maxMaxBufferLength: 10,
-                    xhrSetup: function(xhr, url) {
-                        xhr.withCredentials = true; // Send CDN session cookie
+                    xhrSetup: function(xhr) {
+                        xhr.withCredentials = true;
                     }
                 });
                 window.hls = hls;
@@ -1957,26 +2907,23 @@
                 });
                 hls.on(Hls.Events.ERROR, function(event, data) {
                     if (data.fatal) {
-                        console.warn('HLS error, falling back to MJPEG:', data);
                         hls.destroy();
                         window.hls = null;
                         video.style.display = 'none';
                         img.style.display = 'block';
                         img.classList.remove('snapshot-mode');
                         img.src = `${API_BASE}/api/cameras/${currentModalCameraId}/stream?t=${Date.now()}`;
-                        if (footerText) footerText.textContent = 'HLS Failed · Falling back to MJPEG Proxy Stream';
+                        if (footerText) footerText.textContent = 'Falling back to MJPEG Proxy Stream';
                     }
                 });
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                // Native HLS (Safari)
                 video.src = hlsUrl;
                 video.addEventListener('error', function() {
-                    console.warn('Native HLS error, falling back to MJPEG');
                     video.style.display = 'none';
                     img.style.display = 'block';
                     img.classList.remove('snapshot-mode');
                     img.src = `${API_BASE}/api/cameras/${currentModalCameraId}/stream?t=${Date.now()}`;
-                    if (footerText) footerText.textContent = 'HLS Failed · Falling back to MJPEG Proxy Stream';
+                    if (footerText) footerText.textContent = 'Falling back to MJPEG Proxy Stream';
                 });
                 video.addEventListener('loadedmetadata', function() {
                     video.play().catch(e => console.warn('Autoplay prevented:', e));
@@ -1985,7 +2932,7 @@
             
             if (liveToggle) liveToggle.className = 'stream-live-badge active';
             if (liveToggleText) liveToggleText.textContent = 'LIVE';
-            if (footerText) footerText.textContent = 'HLS Direct CDN Stream · Low Latency · Dynamic Extraction';
+            if (footerText) footerText.textContent = 'High-Speed Stream · Dynamic AI Active';
         }
     }
 
@@ -2056,10 +3003,8 @@
         
         if (scanline) scanline.style.display = 'none';
         currentModalLiveStream = false;
-
         overlay.classList.remove('active');
 
-        // Stop extraction on this camera immediately to prevent lag and free resources
         if (currentModalCameraId) {
             const camId = currentModalCameraId;
             currentModalCameraId = null;
@@ -2078,7 +3023,6 @@
         const count = document.getElementById('modal-det-count');
         if (!list) return;
 
-        // Deduplicate by plate_number — keep best confidence per plate
         const plateMap = new Map();
         modalDetections.forEach(a => {
             const existing = plateMap.get(a.plate_number);
@@ -2107,10 +3051,10 @@
                 <div class="cam-det-card" onclick="openDetailModal('${alertJson}')">
                     <div class="cam-det-plate">${a.plate_number || '???'}${sightingTag}</div>
                     <div class="cam-det-meta">
-                        <span style="color: var(--text-muted);">${vicon} ${a.vehicle_type || 'Vehicle'}</span>
+                        <span style="color: var(--paper-muted);">${vicon} ${a.vehicle_type || 'Vehicle'}</span>
                         <span class="alert-confidence ${confidenceClass(a.confidence || 0)}">${conf}</span>
                     </div>
-                    <div style="font-size: 0.66rem; color: var(--text-muted); font-family: var(--font-mono);">
+                    <div style="font-size: 0.66rem; color: var(--paper-dim); font-family: var(--font-mono); margin-top:2px;">
                         ${formatTime(a.detected_at || a.timestamp)}
                     </div>
                 </div>
@@ -2118,18 +3062,17 @@
         }).join('');
     }
 
-    // Escape key closes modals
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             closeStreamModal();
             closeDetailModal();
+            closeAddTargetModal();
         }
     });
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // Detail View Modal
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
     const VTYPE_ICONS = {
         'Sedan': '🚘', 'SUV': '🚙', 'Two-Wheeler': '🛵', 'Truck': '🚛', 'Hatchback': '🚗'
     };
@@ -2173,146 +3116,25 @@
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // Init
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-    document.addEventListener('DOMContentLoaded', () => {
-        initMap();
-        fetchStats();
-        fetchCameras();
-        fetchAlerts();
-        connectWebSocket();
-
-        setInterval(() => {
-            fetchStats();
-            fetchCameras();
-            fetchAlerts();
-        }, POLL_INTERVAL_MS);
-    });
-    </script>
-
-    <!-- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-         NEW FEATURES — CSS + JavaScript
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ -->
-    <style>
-        /* ── Nav Tabs ── */
-        .main-nav { display:flex; gap:4px; align-items:center; }
-        .nav-tab {
-            padding: 7px 14px; border-radius: var(--radius-sm);
-            background: transparent; border: 1px solid transparent;
-            color: var(--text-muted); font-size: 0.78rem; font-weight: 600;
-            cursor: pointer; transition: all var(--transition-fast);
-            white-space: nowrap;
-        }
-        .nav-tab:hover { background: var(--bg-card); color: var(--text-primary); border-color: var(--border-subtle); }
-        .nav-tab.active { background: #0284c7; color: #fff; border-color: #0284c7; box-shadow: 0 0 12px rgba(2,132,199,0.35); }
-
-        /* ── Feature Panels ── */
-        .feature-panel { padding: 28px 28px 40px; max-width: 1400px; margin: 0 auto; }
-        .feature-panel-header { margin-bottom: 24px; }
-        .feature-panel-title { font-size: 1.4rem; font-weight: 800; color: var(--text-primary); margin-bottom: 6px; }
-        .feature-panel-sub { font-size: 0.85rem; color: var(--text-muted); }
-        .feature-empty { text-align:center; padding: 60px 20px; color: var(--text-muted); }
-
-        /* ── Route Tracker ── */
-        .route-search-bar { display:flex; gap:12px; margin-bottom:28px; }
-        .route-plate-input {
-            flex:1; padding: 12px 18px; background: var(--bg-card);
-            border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
-            color: var(--text-primary); font-family: var(--font-mono); font-size: 1rem;
-            letter-spacing: 2px; text-transform: uppercase;
-        }
-        .route-plate-input:focus { outline:none; border-color: var(--accent-cyan); }
-        .route-search-btn {
-            padding: 12px 28px; background: var(--accent-cyan); color: #000;
-            border:none; border-radius: var(--radius-sm); font-weight: 700;
-            font-size: 0.9rem; cursor: pointer; transition: all var(--transition-fast);
-        }
-        .route-search-btn:hover { background: #00cfee; transform: translateY(-1px); }
-        .route-summary-cards { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px; }
-        .route-stat-card {
-            background: var(--bg-card); border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-md); padding: 16px; text-align:center;
-        }
-        .route-stat-label { font-size:0.7rem; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); }
-        .route-stat-value { font-size:1.6rem; font-weight:800; margin-top:4px; }
-        .route-layout { display:grid; grid-template-columns:1fr 300px; gap:20px; }
-        .route-map-container { height:440px; border-radius: var(--radius-md); overflow:hidden; border:1px solid var(--border-subtle); background:#05070a; }
-        .route-timeline { background: var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-md); padding:16px; overflow-y:auto; max-height:440px; }
-        .timeline-item { position:relative; padding-left:24px; padding-bottom:20px; border-left:2px solid var(--border-subtle); }
-        .timeline-item:last-child { border-left-color:transparent; padding-bottom:0; }
-        .timeline-dot { position:absolute; left:-7px; top:4px; width:12px; height:12px; border-radius:50%; background:var(--accent-cyan); border:2px solid var(--bg-card); }
-        .timeline-cam { font-weight:700; font-size:0.85rem; color:var(--text-primary); }
-        .timeline-time { font-size:0.72rem; color:var(--text-muted); font-family:var(--font-mono); margin-top:2px; }
-        .timeline-speed { font-size:0.72rem; margin-top:6px; padding:4px 8px; border-radius:4px; display:inline-block; }
-        .speed-ok { background:#064e3b; color:#34d399; }
-        .speed-anomaly { background:#7f1d1d; color:#fca5a5; }
-
-        /* ── Watchlist Table ── */
-        .watchlist-table-wrap { overflow-x:auto; border-radius:var(--radius-md); border:1px solid var(--border-subtle); }
-        .watchlist-table { width:100%; border-collapse:collapse; }
-        .watchlist-table th { padding:12px 16px; text-align:left; font-size:0.72rem; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); background:var(--bg-secondary); border-bottom:1px solid var(--border-subtle); }
-        .watchlist-table td { padding:14px 16px; border-bottom:1px solid var(--border-subtle); font-size:0.85rem; }
-        .watchlist-table tr:last-child td { border-bottom:none; }
-        .watchlist-table tr:hover td { background:rgba(255,255,255,0.02); }
-        .table-empty { text-align:center; padding:40px; color:var(--text-muted); font-style:italic; }
-        .plate-chip { background:var(--bg-secondary); color:var(--accent-cyan); font-family:var(--font-mono); font-size:0.85rem; padding:3px 8px; border-radius:4px; border:1px solid #0c4a6e; }
-        .priority-badge { font-size:0.68rem; font-weight:700; letter-spacing:1px; text-transform:uppercase; padding:3px 8px; border-radius:var(--radius-full); }
-        .priority-critical { background:#7f1d1d; color:#fca5a5; border:1px solid #dc2626; }
-        .priority-high { background:#78350f; color:#fcd34d; border:1px solid #d97706; }
-        .priority-medium { background:#1e3a5f; color:#93c5fd; border:1px solid #3b82f6; }
-        .btn-remove { background:none; border:1px solid var(--border-subtle); color:var(--accent-rose); font-size:0.78rem; padding:5px 12px; border-radius:var(--radius-sm); cursor:pointer; transition:all var(--transition-fast); }
-        .btn-remove:hover { background:#7f1d1d; border-color:#dc2626; }
-
-        /* ── Buttons ── */
-        .btn-primary { padding:10px 20px; background:#0284c7; color:#fff; border:none; border-radius:var(--radius-sm); font-weight:700; cursor:pointer; transition:all var(--transition-fast); }
-        .btn-primary:hover { background:#0ea5e9; }
-        .btn-secondary { padding:10px 20px; background:var(--bg-secondary); color:var(--text-secondary); border:1px solid var(--border-subtle); border-radius:var(--radius-sm); font-weight:600; cursor:pointer; }
-        .btn-danger { padding:10px 20px; background:#dc2626; color:#fff; border:none; border-radius:var(--radius-sm); font-weight:700; cursor:pointer; }
-
-        /* ── Evidence Form ── */
-        .evidence-form { max-width:600px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-lg); padding:28px; display:flex; flex-direction:column; gap:18px; }
-        .form-group { display:flex; flex-direction:column; gap:6px; }
-        .form-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-        .form-label { font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); }
-        .form-input {
-            padding:11px 14px; background:var(--bg-secondary); border:1px solid var(--border-subtle);
-            border-radius:var(--radius-sm); color:var(--text-primary); font-size:0.9rem;
-        }
-        .form-input:focus { outline:none; border-color:var(--accent-cyan); }
-
-        /* ── Coverage Map ── */
-        .coverage-layout { display:grid; grid-template-columns:1fr 280px; gap:20px; }
-        .coverage-stats { display:flex; flex-direction:column; gap:12px; }
-
-        @media (max-width: 900px) {
-            .route-layout, .coverage-layout { grid-template-columns:1fr; }
-            .route-summary-cards { grid-template-columns:1fr 1fr; }
-            .main-nav { display:none; }
-        }
-    </style>
-
-    <script>
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // TAB NAVIGATION
+    // MAGAZINE TAB NAVIGATION
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     let coverageMapInstance = null;
     let routeMapInstance = null;
 
     function switchTab(tab) {
-        // Toggle main dashboard visibility
         document.querySelector('.main').style.display = tab === 'dashboard' ? '' : 'none';
-        ['route', 'watchlist', 'evidence', 'coverage'].forEach(t => {
+        ['route', 'watchlist', 'evidence', 'coverage', 'tracks'].forEach(t => {
             const p = document.getElementById('panel-' + t);
             if (p) p.style.display = (t === tab) ? '' : 'none';
         });
-        // Update active button
+
         document.querySelectorAll('.nav-tab').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.tab === tab);
         });
-        // Lazy-init feature maps when their tab is first opened
+
         if (tab === 'watchlist') loadWatchlist();
         if (tab === 'coverage') initCoverageMap();
+        if (tab === 'tracks') loadAnonymousTracks();
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2343,74 +3165,71 @@
     function renderRouteResult(data) {
         const { plate, summary, sightings, route_segments, geojson } = data;
 
-        // Summary cards
-        const confColor = summary.confidence_score === 'High' ? 'var(--accent-emerald)' : 'var(--accent-rose)';
         document.getElementById('route-summary-cards').innerHTML = `
             <div class="route-stat-card">
-                <div class="route-stat-label">Plate</div>
-                <div class="route-stat-value" style="font-size:1.1rem;font-family:var(--font-mono);color:var(--accent-cyan)">${plate}</div>
+                <div class="route-stat-label">Target Plate</div>
+                <div class="route-stat-value" style="font-size:1.15rem;font-family:var(--font-mono);">${plate}</div>
             </div>
             <div class="route-stat-card">
                 <div class="route-stat-label">Total Distance</div>
-                <div class="route-stat-value" style="color:var(--accent-blue)">${summary.total_distance_km} <span style="font-size:0.9rem">km</span></div>
+                <div class="route-stat-value">${summary.total_distance_km} <span style="font-size:0.85rem;color:var(--paper-muted)">km</span></div>
             </div>
             <div class="route-stat-card">
-                <div class="route-stat-label">Avg Speed</div>
-                <div class="route-stat-value" style="color:var(--accent-amber)">${summary.avg_speed_kmh} <span style="font-size:0.9rem">km/h</span></div>
+                <div class="route-stat-label">Average Speed</div>
+                <div class="route-stat-value">${summary.avg_speed_kmh} <span style="font-size:0.85rem;color:var(--paper-muted)">km/h</span></div>
             </div>
             <div class="route-stat-card">
-                <div class="route-stat-label">Confidence</div>
-                <div class="route-stat-value" style="color:${confColor}">${summary.confidence_score}</div>
-            </div>`;
+                <div class="route-stat-label">Total Sightings</div>
+                <div class="route-stat-value">${summary.sightings_count}</div>
+            </div>
+        `;
 
-        // Timeline
+        document.getElementById('route-empty').style.display = 'none';
+        document.getElementById('route-result').style.display = 'block';
+
         const tl = document.getElementById('route-timeline');
-        if (sightings.length === 0) {
-            tl.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">No sightings found.</div>';
-        } else {
-            tl.innerHTML = sightings.map((s, i) => {
-                const seg = route_segments[i];
-                const speedHtml = seg ? `<div class="timeline-speed ${seg.is_anomaly ? 'speed-anomaly' : 'speed-ok'}">
-                    ↓ ${seg.distance_km}km &nbsp; ${seg.speed_kmh}km/h ${seg.is_anomaly ? '⚠ ANOMALY' : ''}
-                </div>` : '';
-                return `<div class="timeline-item">
+        tl.innerHTML = sightings.map((s, i) => {
+            const seg = route_segments[i];
+            let speedBadge = '';
+            if (seg) {
+                const isAnom = seg.is_anomaly;
+                speedBadge = `<span class="timeline-speed ${isAnom ? 'speed-anomaly' : 'speed-ok'}">
+                    ${isAnom ? '⚠ SPEED ANOMALY: ' : ''}${seg.speed_kmh} km/h (${seg.distance_km} km)
+                </span>`;
+            }
+            return `
+                <div class="timeline-item">
                     <div class="timeline-dot"></div>
                     <div class="timeline-cam">#${i+1} — ${s.name || s.camera_id}</div>
                     <div class="timeline-time">${new Date(s.timestamp).toLocaleString()}</div>
-                    ${speedHtml}
-                </div>`;
-            }).join('');
-        }
+                    ${speedBadge}
+                </div>
+            `;
+        }).join('');
 
-        // Map
-        document.getElementById('route-result').style.display = '';
-        document.getElementById('route-empty').style.display = 'none';
-
-        // Destroy old map instance if exists
-        if (routeMapInstance) { routeMapInstance.remove(); routeMapInstance = null; }
         setTimeout(() => {
-            const center = sightings.length > 0 ? [sightings[0].lat || 23.02, sightings[0].lng || 72.57] : [23.02, 72.57];
-            routeMapInstance = L.map('route-map').setView(center, 12);
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                attribution: '© CARTO'
-            }).addTo(routeMapInstance);
+            if (!routeMapInstance) {
+                routeMapInstance = L.map('route-map').setView([23.025, 72.55], 12);
+                createGoogleMapLayer('roadmap').addTo(routeMapInstance);
+            } else {
+                routeMapInstance.eachLayer(l => {
+                    if (l instanceof L.Marker || l instanceof L.Polyline) routeMapInstance.removeLayer(l);
+                });
+            }
 
             const latLngs = [];
-
-            // Draw OSRM route
             if (geojson && geojson.coordinates) {
                 const coords = geojson.coordinates.map(c => [c[1], c[0]]);
-                L.polyline(coords, { color: '#00e5ff', weight: 4, opacity: 0.85 }).addTo(routeMapInstance);
+                L.polyline(coords, { color: '#ffffff', weight: 4, opacity: 0.9 }).addTo(routeMapInstance);
                 coords.forEach(c => latLngs.push(c));
             }
 
-            // Draw markers
             sightings.forEach((s, i) => {
                 if (s.lat == null) return;
                 const icon = L.divIcon({
                     className: '',
-                    html: `<div style="background:#0ea5e9;color:#fff;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;border:2px solid #fff;box-shadow:0 0 12px rgba(0,0,0,0.5)">${i+1}</div>`,
-                    iconSize: [26,26], iconAnchor: [13,13]
+                    html: `<div style="background:#ffffff;color:#ffffff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11px;border:2px solid #fff;box-shadow:0 0 10px rgba(0,0,0,0.6)">${i+1}</div>`,
+                    iconSize: [24,24], iconAnchor: [12,12]
                 });
                 L.marker([s.lat, s.lng], { icon })
                     .addTo(routeMapInstance)
@@ -2418,13 +3237,12 @@
                 latLngs.push([s.lat, s.lng]);
             });
 
-            // Anomaly segments (fallback polylines on top of OSRM)
             route_segments.forEach((seg, i) => {
                 if (seg.is_anomaly && sightings[i] && sightings[i+1]) {
                     const s1 = sightings[i], s2 = sightings[i+1];
                     if (s1.lat && s2.lat) {
                         L.polyline([[s1.lat,s1.lng],[s2.lat,s2.lng]], {
-                            color: '#ef4444', weight: 4, dashArray: '10,6', opacity: 0.9
+                            color: '#ffffff', weight: 4, dashArray: '6,6', opacity: 0.95
                         }).addTo(routeMapInstance);
                     }
                 }
@@ -2454,26 +3272,26 @@
                     <td><span class="plate-chip">${t.plate_number}</span></td>
                     <td>${t.reason}</td>
                     <td><span class="priority-badge ${pClass}">${t.priority.toUpperCase()}</span></td>
-                    <td style="font-family:var(--font-mono);font-size:0.78rem;color:var(--text-muted)">${new Date(t.added_at).toLocaleString()}</td>
+                    <td style="font-family:var(--font-mono);font-size:0.78rem;color:var(--paper-muted)">${new Date(t.added_at).toLocaleString()}</td>
                     <td><button class="btn-remove" onclick="removeTarget('${t.plate_number}')">Remove</button></td>
                 </tr>`;
             }).join('');
         } catch(e) {
-            tbody.innerHTML = `<tr><td colspan="5" class="table-empty" style="color:var(--accent-rose)">Error loading watchlist: ${e.message}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="5" class="table-empty">Error loading watchlist: ${e.message}</td></tr>`;
         }
     }
 
     function openAddTargetModal() {
-        document.getElementById('add-target-overlay').style.display = 'flex';
-        document.getElementById('add-target-overlay').style.alignItems = 'center';
-        document.getElementById('add-target-overlay').style.justifyContent = 'center';
-        document.getElementById('add-target-overlay').classList.add('active');
+        const overlay = document.getElementById('add-target-overlay');
+        overlay.style.display = 'flex';
+        overlay.classList.add('active');
     }
 
     function closeAddTargetModal(event) {
         if (event && event.target !== event.currentTarget) return;
-        document.getElementById('add-target-overlay').classList.remove('active');
-        setTimeout(() => document.getElementById('add-target-overlay').style.display = 'none', 200);
+        const overlay = document.getElementById('add-target-overlay');
+        overlay.classList.remove('active');
+        setTimeout(() => overlay.style.display = 'none', 200);
     }
 
     async function submitAddTarget() {
@@ -2517,14 +3335,14 @@
         const btn = document.getElementById('ev-generate-btn');
 
         if (!plate || !startRaw || !endRaw || !operator) {
-            statusEl.style.color = 'var(--accent-rose)';
-            statusEl.textContent = '⚠ Please fill in all fields.';
+            statusEl.style.color = '#ffffff';
+            statusEl.textContent = '⚠ Please fill in all required fields.';
             return;
         }
 
-        btn.textContent = '⏳ Generating PDF…'; btn.disabled = true;
-        statusEl.style.color = 'var(--text-muted)';
-        statusEl.textContent = 'Computing SHA-256 hashes and building PDF…';
+        btn.textContent = '⏳ Compiling Dossier…'; btn.disabled = true;
+        statusEl.style.color = 'var(--paper-muted)';
+        statusEl.textContent = 'Computing SHA-256 integrity hashes and compiling ReportLab PDF…';
 
         try {
             const res = await fetch('/api/evidence/generate', {
@@ -2543,7 +3361,6 @@
                 throw new Error(err.detail || `HTTP ${res.status}`);
             }
 
-            // Trigger browser download
             const blob = await res.blob();
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -2553,11 +3370,11 @@
             document.body.appendChild(a); a.click();
             URL.revokeObjectURL(url); a.remove();
 
-            statusEl.style.color = 'var(--accent-emerald)';
-            statusEl.textContent = '✅ Dossier downloaded successfully.';
+            statusEl.style.color = '#ffffff';
+            statusEl.textContent = '✅ Certified Section 65B Dossier generated and downloaded.';
         } catch(e) {
-            statusEl.style.color = 'var(--accent-rose)';
-            statusEl.textContent = '❌ Error: ' + e.message;
+            statusEl.style.color = '#ffffff';
+            statusEl.textContent = '❌ Generation failed: ' + e.message;
         } finally {
             btn.textContent = 'Generate Certified Dossier (PDF)'; btn.disabled = false;
         }
@@ -2567,28 +3384,24 @@
     // FEATURE 4: COVERAGE MAP
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     async function initCoverageMap() {
-        if (coverageMapInstance) return; // already initialised
+        if (coverageMapInstance) return;
 
         coverageMapInstance = L.map('coverage-map').setView([22.9, 72.6], 10);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '© CARTO'
-        }).addTo(coverageMapInstance);
+        createGoogleMapLayer('roadmap').addTo(coverageMapInstance);
 
         try {
-            // Draw existing cameras as 150m green coverage circles
             const camRes = await fetch('/api/cameras');
             const camData = await camRes.json();
             const cameras = camData.cameras || [];
             cameras.forEach(cam => {
                 if (!cam.latitude) return;
                 L.circle([cam.latitude, cam.longitude], {
-                    radius: 150, color: '#10b981', fillColor: '#10b981',
-                    fillOpacity: 0.12, weight: 1.5
+                    radius: 150, color: '#ffffff', fillColor: '#ffffff',
+                    fillOpacity: 0.10, weight: 1.2
                 }).addTo(coverageMapInstance)
                 .bindPopup(`<b>${cam.camera_name || cam.camera_id}</b><br><small>${cam.latitude}, ${cam.longitude}</small>`);
             });
 
-            // Load gap analysis
             const gapRes = await fetch('/api/cameras/coverage-analysis');
             const gapData = await gapRes.json();
 
@@ -2596,30 +3409,35 @@
             document.getElementById('cov-gaps').textContent = gapData.coverage_gaps.length;
             document.getElementById('cov-recs').textContent = gapData.recommended_deployments.length;
 
-            // Gap markers (red)
-            const gapIcon = L.divIcon({ className:'', html:`<div style="width:18px;height:18px;border-radius:50%;background:#ef4444;border:2px solid #fff;box-shadow:0 0 16px #ef4444;animation:pulseGlow 1.5s infinite"></div>`, iconSize:[18,18], iconAnchor:[9,9] });
+            const gapIcon = L.divIcon({
+                className:'',
+                html:`<div style="width:16px;height:16px;border-radius:50%;background:#ffffff;border:2px solid #fff;box-shadow:0 0 14px #ffffff;animation:pulseGlow 1.5s infinite"></div>`,
+                iconSize:[16,16], iconAnchor:[8,8]
+            });
             gapData.coverage_gaps.forEach(g => {
                 L.marker([g.location.lat, g.location.lng], { icon: gapIcon })
                     .addTo(coverageMapInstance)
                     .bindPopup(`<b>⚠ ${g.severity.toUpperCase()} GAP</b><br>${g.description}`);
             });
 
-            // Recommended deployment pins (amber)
-            const recIcon = L.divIcon({ className:'', html:`<div style="width:22px;height:22px;border-radius:50%;background:#f59e0b;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-weight:700;color:#000;font-size:13px;box-shadow:0 0 14px rgba(245,158,11,0.8)">+</div>`, iconSize:[22,22], iconAnchor:[11,11] });
+            const recIcon = L.divIcon({
+                className:'',
+                html:`<div style="width:20px;height:20px;border-radius:50%;background:#707075;border:2px solid #ffffff;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:12px;box-shadow:0 0 10px rgba(0,0,0,0.4)">+</div>`,
+                iconSize:[20,20], iconAnchor:[10,10]
+            });
             gapData.recommended_deployments.forEach(r => {
                 L.marker([r.lat, r.lng], { icon: recIcon })
                     .addTo(coverageMapInstance)
                     .bindPopup(`<b>📍 Suggested Placement</b><br>${r.reason}`);
             });
 
-            // Gaps list panel
             const listEl = document.getElementById('coverage-gaps-list');
             if (gapData.coverage_gaps.length > 0) {
-                listEl.innerHTML = '<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:10px;">Identified Blind Spots</div>' +
+                listEl.innerHTML = '<div style="font-family:var(--font-mono);font-size:0.70rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--paper-muted);margin-bottom:10px;">Identified Blind Spots</div>' +
                     gapData.coverage_gaps.map(g => `
-                        <div style="background:var(--bg-secondary);border:1px solid #7f1d1d;border-radius:8px;padding:12px;margin-bottom:8px;">
-                            <div style="font-size:0.7rem;font-weight:700;color:#fca5a5;text-transform:uppercase;margin-bottom:4px;">${g.severity} — ${g.gap_id}</div>
-                            <div style="font-size:0.78rem;color:var(--text-secondary)">${g.description}</div>
+                        <div style="background:rgba(20,20,26,0.8);border:1px solid var(--border-specular);border-radius:6px;padding:12px;margin-bottom:8px;">
+                            <div style="font-family:var(--font-mono);font-size:0.70rem;font-weight:800;color:#ffffff;text-transform:uppercase;margin-bottom:4px;">${g.severity} — ${g.gap_id}</div>
+                            <div style="font-size:0.80rem;color:var(--paper-secondary)">${g.description}</div>
                         </div>`).join('');
             }
         } catch(e) {
@@ -2628,20 +3446,49 @@
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // WATCHLIST SIREN (WebSocket integration)
+    // FEATURE 5: CROSS-CAMERA ANONYMOUS TRACKS (TAB 06)
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    async function loadAnonymousTracks() {
+        const tbody = document.getElementById('tracks-tbody');
+        if (!tbody) return;
+        try {
+            const res = await apiFetch('/api/anonymous-tracks');
+            const data = await res.json();
+            const tracks = data.tracks || [];
+            if (tracks.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="table-empty">No active anonymous tracks currently unassigned.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = tracks.map(t => {
+                const statusBadge = t.resolved_plate
+                    ? `<span class="priority-badge" style="background:#fff;color:#fff;">RESOLVED → ${t.resolved_plate}</span>`
+                    : `<span class="priority-badge" style="background:rgba(0,0,0,0.08);color:var(--paper-muted);border:1px solid var(--border-subtle);">ANONYMOUS</span>`;
+                return `<tr>
+                    <td><span class="plate-chip">${t.anon_id}</span></td>
+                    <td style="font-family:var(--font-mono);">${t.camera_id}</td>
+                    <td>${t.vehicle_color || 'Unknown'} ${t.vehicle_type || 'Vehicle'}</td>
+                    <td style="font-family:var(--font-mono);font-size:0.75rem;color:var(--paper-muted)">${new Date(t.first_seen_at).toLocaleTimeString()}</td>
+                    <td>${statusBadge}</td>
+                </tr>`;
+            }).join('');
+        } catch(e) {
+            tbody.innerHTML = `<tr><td colspan="5" class="table-empty">Error fetching anonymous tracks: ${e.message}</td></tr>`;
+        }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // WATCHLIST SIREN & MERGE ALERTS
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     let sirenTimer = null;
-
     function triggerSiren(hit) {
         document.getElementById('siren-plate').textContent = `${hit.plate_number} → target: ${hit.target_plate}`;
         document.getElementById('siren-body').innerHTML =
-            `📍 Detected at <b>${hit.camera_id}</b> &nbsp;|&nbsp; Reason: <b>${hit.reason}</b> &nbsp;|&nbsp; Priority: <b>${hit.priority}</b><br>
-            <span style="font-family:var(--font-mono);font-size:0.72rem;color:#fca5a5">${new Date(hit.timestamp).toLocaleString()}</span>`;
+            `📍 Detected at <b>${hit.camera_id}</b> &nbsp;|&nbsp; Reason: <b>${hit.reason}</b> &nbsp;|&nbsp; Priority: <b>${hit.priority.toUpperCase()}</b><br>
+            <span style="font-family:var(--font-mono);font-size:0.72rem;color:var(--paper-muted)">${new Date(hit.timestamp).toLocaleString()}</span>`;
 
         const banner = document.getElementById('siren-banner');
         banner.style.display = 'block';
 
-        // Web Audio beep
         try {
             const ctx = new (window.AudioContext || window.webkitAudioContext)();
             [880, 1200].forEach((freq, i) => {
@@ -2649,7 +3496,7 @@
                 const gain = ctx.createGain();
                 osc.type = 'square';
                 osc.frequency.value = freq;
-                gain.gain.setValueAtTime(0.3, ctx.currentTime + i*0.15);
+                gain.gain.setValueAtTime(0.25, ctx.currentTime + i*0.15);
                 gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + i*0.15 + 0.15);
                 osc.connect(gain); gain.connect(ctx.destination);
                 osc.start(ctx.currentTime + i*0.15);
@@ -2657,7 +3504,6 @@
             });
         } catch(e) {}
 
-        // Auto-dismiss after 12s
         clearTimeout(sirenTimer);
         sirenTimer = setTimeout(closeSiren, 12000);
     }
@@ -2666,18 +3512,15 @@
         clearTimeout(sirenTimer);
         document.getElementById('siren-banner').style.display = 'none';
     }
+    window._sirenTrigger = triggerSiren;
 
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // ANONYMOUS MERGE ALERT
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     let mergeTimer = null;
-
     function triggerMergeNotification(data) {
         document.getElementById('merge-plate').textContent = data.plate_number;
         document.getElementById('merge-body').innerHTML =
             `📍 Retroactively identified at <b>${data.resolving_camera}</b> &nbsp;|&nbsp; <b>${data.anonymous_tracks_merged}</b> anonymous track(s) merged<br>
-            <span style="font-family:var(--font-mono);font-size:0.72rem;color:#93c5fd">${new Date(data.resolved_at).toLocaleString()}</span><br>
-            <i style="color:#60a5fa">${data.message}</i>`;
+            <span style="font-family:var(--font-mono);font-size:0.72rem;color:var(--paper-secondary)">${new Date(data.resolved_at).toLocaleString()}</span><br>
+            <i style="color:var(--paper-muted)">${data.message}</i>`;
 
         const banner = document.getElementById('merge-banner');
         banner.style.display = 'block';
@@ -2706,49 +3549,22 @@
         document.getElementById('merge-banner').style.display = 'none';
     }
 
-    // Hook into the existing WebSocket handler — listen for watchlist_hit type
-    const _origWsOnMessage = window.__sentinel_ws_onmessage;
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Lifecycle Init
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     document.addEventListener('DOMContentLoaded', () => {
-        // Patch WebSocket onmessage after connectWebSocket() runs
-        setTimeout(() => {
-            const wsKey = Object.keys(window).find(k => window[k] instanceof WebSocket);
-            // We use a MutationObserver-free approach: intercept at the broadcast level
-            // The WS listener below will be the primary handler
-        }, 500);
+        initMap();
+        fetchStats();
+        fetchCameras();
+        fetchAlerts();
+        connectWebSocket();
+
+        setInterval(() => {
+            fetchStats();
+            fetchCameras();
+            fetchAlerts();
+        }, POLL_INTERVAL_MS);
     });
-
-    // Re-export the siren trigger so the existing WS handler can call it
-    window._sirenTrigger = triggerSiren;
-    </script>
-
-    <script>
-    // Patch the existing WebSocket message handler to also handle watchlist_hit
-    const _patchWS = () => {
-        const origConnect = window.connectWebSocket;
-        if (typeof origConnect === 'function') {
-            window.connectWebSocket = function() {
-                origConnect();
-                // Find the WS and add our handler
-                setTimeout(() => {
-                    if (window._sentinelWS) {
-                        const origHandler = window._sentinelWS.onmessage;
-                        window._sentinelWS.onmessage = function(event) {
-                            if (origHandler) origHandler.call(this, event);
-                            try {
-                                const data = JSON.parse(event.data);
-                                if (data.type === 'watchlist_hit') {
-                                    triggerSiren(data);
-                                } else if (data.type === 'cross_camera_merge') {
-                                    triggerMergeNotification(data);
-                                }
-                            } catch(e) {}
-                        };
-                    }
-                }, 1000);
-            };
-        }
-    };
-    document.addEventListener('DOMContentLoaded', _patchWS);
     </script>
 </body>
 </html>

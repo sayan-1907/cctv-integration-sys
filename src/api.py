@@ -1771,6 +1771,41 @@ async def serve_dashboard():
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/snapshots", StaticFiles(directory=str(SNAPSHOTS_DIR)), name="snapshots")
 
+
+class MapsKeyPayload(BaseModel):
+    google_maps_api_key: str
+
+
+@app.get("/api/config/maps")
+async def get_maps_config():
+    key = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
+    return {"google_maps_api_key": key}
+
+
+@app.post("/api/config/maps")
+async def set_maps_config(payload: MapsKeyPayload):
+    key = payload.google_maps_api_key.strip()
+    os.environ["GOOGLE_MAPS_API_KEY"] = key
+    env_file = Path(__file__).resolve().parent.parent / ".env"
+    if env_file.exists():
+        try:
+            content = env_file.read_text(encoding="utf-8").splitlines()
+            found = False
+            new_lines = []
+            for l in content:
+                if l.startswith("GOOGLE_MAPS_API_KEY="):
+                    new_lines.append(f"GOOGLE_MAPS_API_KEY={key}")
+                    found = True
+                else:
+                    new_lines.append(l)
+            if not found:
+                new_lines.append(f"GOOGLE_MAPS_API_KEY={key}")
+            env_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        except Exception as e:
+            logger.warning("Could not write GOOGLE_MAPS_API_KEY to .env: %s", e)
+    return {"status": "ok", "google_maps_api_key": key}
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # New Feature Routers (Route Reconstruction, Watchlist, Evidence, Gap Analysis)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
