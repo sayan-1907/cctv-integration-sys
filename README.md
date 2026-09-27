@@ -1,251 +1,423 @@
-# Layer 1 — Edge Ingestion & VMS Federation
+# Sentinel — ANPR Command Center
 
-## What this is
-
-The middleware adapter that runs on each departmental server. It taps
-existing RTSP streams, decodes only what's needed, and hands throttled
-frames to Layer 2 (AI/metadata extraction) — all locally, on-host.
-Nothing here ever sends video off the server.
-
-## Design invariants (why the code looks the way it does)
-
-1. **One OS process per camera** (`multiprocessing`, not threads).
-   A crash or hang in one stream can't affect any other camera or the
-   host process. The OS reclaims a dead process's memory for free.
-2. **Bounded, drop-oldest queues.** Every camera's output queue has a
-   hard `maxsize`. If Layer 2 falls behind, we drop the oldest frame —
-   never block, never grow unbounded. This is the single guarantee
-   that prevents an edge adapter from OOM-killing a legacy server.
-3. **Decode-time throttling.** We use OpenCV's `grab()`/`retrieve()`
-   split to only fully decode frames we're going to keep (5fps target,
-   not the camera's native 15-30fps). Cheaper on CPU than decoding
-   everything and discarding after.
-4. **Two-tier failure detection.** A dead process is caught by
-   `is_alive()`. A *frozen but still "connected"* stream — a real and
-   common RTSP failure mode — is caught separately by the watchdog
-   comparing `last_frame_ts` against `stall_timeout_seconds`.
-5. **Config-enforced resource ceiling.** `max_concurrent_streams` in
-   the YAML is a hard cap the orchestrator will not exceed, regardless
-   of how many cameras are listed. Protects unknown/legacy hardware.
-
-## Running the demo (no real cameras needed)
-
-```bash
-pip install -r requirements.txt
-cd src
-python3 orchestrator.py ../config/demo_cameras.yaml
-```
-
-This uses `mock://` stream URLs that generate synthetic frames and
-periodically simulate a connection drop, so you can watch — and show
-judges — the full lifecycle: connect → stream → throttled handoff to
-"Layer 2" → simulated failure → backoff → reconnect, with other
-cameras completely unaffected the whole time.
-
-Stop with `Ctrl+C` (SIGINT/SIGTERM are handled for clean shutdown).
-
-## Switching to real cameras
-
-Edit `config/cameras.yaml` (the real, non-demo config):
-
-- Set `rtsp_url` to each camera's actual RTSP stream (from the
-  existing VMS/NVR — ask the department's IT admin for these; usually
-  `rtsp://<ip>:554/<stream-path>`, sometimes needing embedded
-  credentials `rtsp://user:pass@<ip>:554/...`).
-- Set `latitude`/`longitude` — this is the ONLY per-camera data,
-  besides `id` and `department_id`, that should ever be synced to the
-  central PostGIS registry.
-- Tune `max_concurrent_streams` down if the host is old/underpowered.
-  Start conservative (2-4) and raise only after confirming headroom
-  with `top`/`htop` on the department server during a soak test.
-
-Then run against the real config instead of the demo one:
-```bash
-python3 orchestrator.py ../config/cameras.yaml
-```
-
-## What still needs building (next steps for this layer)
-
-- ONVIF auto-discovery (WS-Discovery) so cameras don't have to be
-  hand-entered per department — nice-to-have for the demo, necessary
-  before real deployment across 26 departments.
-- A lightweight heartbeat publisher that pushes `status_summary()`
-  (camera up/down/reconnecting — never video) up to Kafka, feeding
-  the PostGIS `camera_registry.status` column from Layer 3.
-- Per-camera memory/CPU cgroup limits at the OS level as a second
-  belt-and-suspenders layer under the in-app queue bounding.
+> **Statewide Automatic Number Plate Recognition (ANPR) platform** for Gujarat's traffic surveillance grid. Live camera monitoring, AI-powered plate extraction, real-time alert streaming, vehicle route reconstruction, forensic evidence generation, cross-camera identity tracking, and GIS coverage gap analysis — all in one unified system.
 
 ---
 
-## Layer 2 — AI & Metadata Extraction
+## Architecture Overview
 
-Consumes the frames Layer 1 is already producing, runs vehicle
-detection + plate OCR, and emits structured JSON — currently to
-stdout and `/snapshots/` on disk, per this stage's scope (Layer 3
-Kafka routing comes later).
+Sentinel is a four-layer hybrid edge-cloud pipeline. Each layer has a strict contract with its neighbors and can be deployed, restarted, or scaled independently.
 
-### Design decisions and why
-
-| Decision | Reasoning |
-|---|---|
-| **N AI worker processes share M camera queues** (not 1:1 per camera) | YOLO (~6MB) + EasyOCR (~65MB+ of recognition models) get loaded into memory once per worker process. Loading them once per camera would multiply that footprint by camera count — directly undoing Layer 1's whole point of protecting legacy hardware. `ai_worker_count` is a throughput/memory knob independent of how many cameras exist. |
-| **Round-robin, non-blocking queue polling** | A quiet camera never starves a busy one. Layer 1 is never blocked by slow inference — it already drop-oldests independently (see Layer 1's design), this layer just can't assume every frame produced gets seen. |
-| **No separate plate-detector model** | Dedicated ANPR weights found online vary wildly in quality/license/provenance. Instead: YOLOv8n (official, COCO-pretrained, verified working — see Verification below) localizes the *vehicle*; EasyOCR's own text detector finds text inside that crop, filtered by a plate-shaped regex. One fewer flaky external dependency, and it holds up fine at the roughly-frontal angles typical of junction cameras. |
-| **Regex requires ≥1 digit** | An early test caught a real false-positive: pure-letter OCR reads of street signs ("EXIT", "NO PARKING") pass a naive alphanumeric-length check just as easily as a real plate. Requiring at least one digit filters these out while staying general enough for plates from any Indian state. |
-| **Positional glyph-confusion correction** | A synthetic test plate `GJ01AB1234` came back from EasyOCR as `GJOIAB1234` — a real, common OCR failure (0→O, 1→I, and similar look-alikes). Because the standard 10-character Indian plate layout has known letter/digit positions (`LLDDLLDDDD`), wrong-type characters at each position are corrected deterministically rather than just trusting raw OCR output. Verified to fix the observed bug without touching already-correct reads or non-10-character plates. |
-| **Per-camera, per-plate dedup with a cooldown window** | A vehicle stopped at a signal gets re-detected on every frame. Without dedup that's a duplicate event roughly every 200ms feeding into Kafka in Layer 3 for zero new information. |
-| **Snapshots resized before saving** | Enforces "low-res snapshot," not just as a description — `snapshot_max_width` actually downsamples before writing to disk. |
-
-### Verification performed (not just "should work")
-
-This was tested against real models and a real detection, not just
-checked for syntax:
-
-1. **Real YOLOv8n weights downloaded and run** against an actual
-   photograph (official Ultralytics sample image) — correctly
-   detected a bus at 0.873 confidence with a sensible bounding box.
-2. **Plate regex unit-tested** against a battery of real and junk
-   strings — confirmed it accepts real plate shapes and rejects
-   sign-like text (`EXIT`, `NO PARKING`, `SCHOOL ZONE`).
-3. **The 0/O, 1/I OCR confusion bug was caught, not assumed away** —
-   EasyOCR misread a synthetic `GJ01AB1234` plate as `GJOIAB1234`.
-   The positional-correction fix was added specifically because of
-   this, then re-verified to actually resolve it.
-4. **Full multiprocessing pipeline run end-to-end**: a real vehicle
-   photo (with a plate composited onto it) was streamed through
-   Layer 1's mock camera source, picked up by a real Layer 2 AI
-   worker process, detected, OCR'd, corrected, deduplicated, and
-   written out as both a console JSON payload and a saved snapshot
-   file — confirmed by opening the actual saved image afterward.
-
-### Known limitations, stated plainly
-
-- The plate-format correction assumes the common 10-character
-  `LLDDLLDDDD` layout. Other valid formats (different RTO-code
-  digit counts, BH-series plates, etc.) are left uncorrected rather
-  than guessed at — better to under-correct than to silently mangle
-  a format the positional assumption doesn't fit.
-- OCR accuracy on real, unstaged traffic footage (low light, oblique
-  angles, motion blur, dirty plates) has NOT been tested — only a
-  clean, well-lit, frontal composite. Expect materially lower
-  accuracy on real deployment footage; this is a real limitation to
-  budget testing time for.
-- EasyOCR's recognition models auto-download (~65MB) from GitHub
-  releases on first run of any AI worker — this happens once per
-  host and is cached afterward, but the first `orchestrator.py` run
-  on a fresh department server will be slower to reach "ready."
-
-### Running it
-
-Same entry point as Layer 1 — Layer 2 starts automatically if a
-`layer2:` block exists in the config:
-
-```bash
-pip install -r requirements.txt
-cd src
-python3 orchestrator.py ../config/demo_cameras.yaml
 ```
-
-Watch for `Layer2 Status: {'ai-worker-0': 'ready', ...}` in the logs
-once models finish loading, then JSON payloads print to stdout as
-plates are detected, with matching files appearing under
-`../snapshots/<camera_id>/`.
-
-Note: `demo_cameras.yaml`'s mock streams are synthetic patterns (no
-real vehicles), so you likely won't see detections running the demo
-config as-is — that config exists to prove Layer 1's plumbing. To see
-Layer 2 actually detect and extract a plate, point a camera's
-`rtsp_url` at a real video file or RTSP feed containing vehicles, or
-use the `mock://<w>x<h>?image=<path>` scheme (added for this layer)
-to serve a static real photo as the "stream."
-
-## Files
-
-| File | Purpose |
-|---|---|
-| `src/stream_worker.py` | Per-camera isolated process: connect, throttle-decode, bounded-queue emit, reconnect/backoff. Includes the `mock://` synthetic source for demoing without hardware, plus an optional `?image=<path>` mode to serve a real static photo (used for Layer 2 integration testing). |
-| `src/orchestrator.py` | Spawns/supervises Layer 1 camera workers AND Layer 2 AI workers, enforces the resource ceiling, runs the stall watchdog for both layers, reports combined status. |
-| `src/ai_worker.py` | Layer 2 entry point: model loading, round-robin queue consumption, vehicle detection, plate OCR + correction, dedup, snapshot saving, JSON payload emission. |
-| `src/kafka_publisher.py` | Layer 3 fault-tolerant Kafka producer: async send, SQLite spill file for offline buffering, automatic drain on reconnect. |
-| `src/consumer.py` | Layer 4 Kafka-to-PostGIS consumer: subscribes to `traffic-anpr-alerts` and `camera-heartbeats`, idempotent inserts, camera registry upserts. |
-| `src/api.py` | Layer 4 FastAPI dashboard backend: REST endpoints for cameras/alerts/stats, WebSocket real-time alert push, static file serving. |
-| `src/static/index.html` | Layer 4 dashboard frontend: dark-themed Leaflet map, live alert feed, plate search, stats cards with glassmorphism. |
-| `config/cameras.yaml` | Real per-department camera config template, now including the `layer2:` and `layer3:` blocks. |
-| `config/demo_cameras.yaml` | Synthetic config for demoing/testing Layer 1 plumbing without real RTSP cameras. |
-| `docker-compose.yml` | Spins up Zookeeper, Kafka (with topic init), and PostGIS for local development. |
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         EDGE  (runs on department servers)                   │
+│                                                                              │
+│   ┌──────────────────┐     ┌───────────────────┐     ┌──────────────────┐   │
+│   │   Layer 1        │     │   Layer 2          │     │   Layer 3        │   │
+│   │  Stream Worker   │────▶│   AI Worker        │────▶│  Kafka Publisher │   │
+│   │                  │     │                    │     │                  │   │
+│   │ • RTSP decode    │     │ • YOLOv8n vehicle  │     │ • Async produce  │   │
+│   │ • 5 fps throttle │     │   detection        │     │ • SQLite spill   │   │
+│   │ • Bounded queue  │     │ • EasyOCR / ALPR   │     │   on disconnect  │   │
+│   │ • Auto-reconnect │     │ • Plate correction │     │ • Auto-drain on  │   │
+│   │ • mock:// source │     │ • Dedup window     │     │   reconnect      │   │
+│   │ • Per-process    │     │ • Snapshot crop    │     │                  │   │
+│   └──────────────────┘     └───────────────────┘     └────────┬─────────┘   │
+│         ▲                         ▲                            │             │
+│         └────────────── orchestrator.py supervises ───────────┘             │
+│                         (spawns, watchdogs, resource ceiling)                │
+└───────────────────────────────────────────────────────────────┬─────────────┘
+                                                                │
+                                              Kafka  traffic-anpr-alerts
+                                              Topics camera-heartbeats
+                                                                │
+┌───────────────────────────────────────────────────────────────▼─────────────┐
+│                         CLOUD  (Layer 4 — central server)                    │
+│                                                                              │
+│   ┌──────────────────┐        ┌──────────────────────────────────────────┐  │
+│   │   consumer.py    │        │   api.py   (FastAPI — port 8000)         │  │
+│   │                  │        │                                          │  │
+│   │ • Kafka→SQLite   │        │  REST  ·  WebSocket  ·  MJPEG Stream    │  │
+│   │ • Idempotent     │──────▶│  On-Demand AI Extraction Engine          │  │
+│   │   inserts        │        │  RBAC API-Key Authentication             │  │
+│   │ • Watchlist hit  │        │  Cross-Camera Identity Resolution        │  │
+│   │   detection      │        │                                          │  │
+│   │ • Fuzzy OCR      │        └──────────────┬───────────────────────────┘  │
+│   │   matching       │                       │                              │
+│   └────────┬─────────┘          ┌────────────▼──────────────────────────┐  │
+│            │                    │   index.html  (Dashboard Frontend)     │  │
+│            ▼                    │                                        │  │
+│       sentinel.db               │  • Live Leaflet camera map             │  │
+│      (SQLite / WAL)             │  • Real-time alert feed (WebSocket)    │  │
+│                                 │  • On-demand MJPEG stream viewer       │  │
+│                                 │  • Vehicle route reconstruction        │  │
+│                                 │  • Watchlist management & siren        │  │
+│                                 │  • Section 65B evidence dossier (PDF)  │  │
+│                                 │  • GIS coverage gap analysis           │  │
+│                                 │  • Cross-camera identity merge alerts  │  │
+│                                 └────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## Layer 4 — Cloud Consumer, PostGIS & Dashboard
+## Features
 
-Consumes Kafka streams from the edge, persists them in a spatial
-database (PostGIS), and serves a live web dashboard for monitoring
-cameras and ANPR alerts.
+### Layer 1 — Edge Stream Ingestion
 
-### Architecture
+- **One OS process per camera.** A crash or hang in one stream cannot affect any other camera or the host.
+- **Bounded, drop-oldest queues.** Every camera queue has a hard `maxsize`. If Layer 2 falls behind, we drop the oldest frame — never block, never OOM.
+- **Decode-time throttling.** Uses OpenCV `grab()`/`retrieve()` to only fully decode frames at a 5 fps target (not the camera's native 15–30 fps).
+- **Two-tier failure detection.** Dead processes caught by `is_alive()`; *frozen-but-connected* streams caught by a watchdog comparing `last_frame_ts` against `stall_timeout_seconds`.
+- **`mock://` synthetic source.** Runs without any real cameras for demos and CI — generates synthetic frames and simulates connection drops.
+- **Config-enforced resource ceiling.** `max_concurrent_streams` in YAML is a hard cap the orchestrator will not exceed.
 
+### Layer 2 — AI & Metadata Extraction
+
+- **YOLOv8n vehicle detection** (official Ultralytics weights, COCO-pretrained). Detects cars, motorcycles, buses, trucks.
+- **EasyOCR / fast-alpr plate reading** inside the YOLO vehicle crop — no separately-sourced ANPR model needed.
+- **Positional glyph-confusion correction.** Deterministically corrects common OCR errors (0↔O, 1↔I, 5↔S, 8↔B, 2↔Z) at known letter/digit positions in the standard 10-character Indian plate format (`LLDDLLDDDD`).
+- **Plate regex validation.** Normalized, uppercase, 4–11 chars, must contain ≥1 digit — filters shop signs and non-plate text.
+- **Per-camera, per-plate dedup window.** Suppresses repeated detections of the same plate within a configurable cooldown.
+- **Snapshot crop saving.** Saves a resized low-res JPEG crop of the vehicle region — never the full frame.
+- **N workers, M queues.** YOLO + OCR models load once per worker process, not once per camera.
+
+### Layer 3 — Fault-Tolerant Kafka Publishing
+
+- **Async produce.** The inference loop is never blocked by network I/O to the central broker.
+- **SQLite spill file.** If Kafka is unreachable, undelivered payloads spill to a local per-worker SQLite database.
+- **Auto-drain on reconnect.** When the broker comes back, spilled payloads are drained in order before new ones are sent.
+- **Two topics:** `traffic-anpr-alerts` (plate detections) and `camera-heartbeats` (camera status).
+
+### Layer 4 — Cloud Dashboard & API
+
+#### On-Demand Camera Engine
+- Cameras run **idle by default** — no continuous AI inference across all 30+ cameras simultaneously.
+- When a user opens a camera in the browser, **YOLOv8 + ALPR activates dynamically** for that specific camera only.
+- **Concurrency safety cap** (default: 2 simultaneous extractions). When the cap is hit, the oldest idle extraction is evicted.
+- **Auto-reclaim.** Camera worker threads shut down automatically after 5s with no viewers and no active extraction.
+
+#### Live Video Streaming
+- **MJPEG proxy stream** — single-pipeline shared decoder per camera, multiple viewers served from one thread.
+- **HLS direct CDN stream** — via `hls.js`, connects directly to `cctv.corp8.cloud/{camera_id}/index.m3u8` with low latency.
+- **Snapshot mode** (default) — lightweight single-JPEG refresh every 3s, no continuous stream overhead.
+- **Tactical standby frame** — professional CCTV-style diagnostic pattern when RTSP feed is offline/unauthorized.
+- **Simulated tactical frame** — animated vehicle overlay when RTSP offline and extraction is active (demo mode).
+- **RTSP credential injection** — `RTSP_AUTH_EMAIL` / `RTSP_AUTH_PASSWORD` from `.env` are URL-encoded and injected per-camera at startup.
+
+#### Real-Time Alert Feed
+- **WebSocket push** (`/ws/alerts`) — new detections broadcast to all connected browser clients within ~1.5s.
+- **Alert deduplication** — per-plate, per-camera cooldown window (60s on-demand, 8s Layer 2 pipeline).
+- **Confidence tracking** — best confidence per plate is updated in-memory and in SQLite as the vehicle lingers.
+- **Sighting count** — how many times a plate has been seen (shown as a badge in the feed).
+- **Plate search** — debounced real-time search across the alert feed.
+- **Global background extraction** — randomly simulates AI extraction across all cameras to populate the live feed even when no camera is open.
+
+#### RBAC — API Key Authentication
+- **SHA-256 hashed API keys** stored in SQLite — raw keys are never stored, only shown once at mint time.
+- **Bootstrap admin key** auto-minted on first startup — printed to console.
+- **Department-scoped access** — operators see only their department's cameras; admins see all.
+- **Role-based:** `admin` | `operator`.
+- **Admin key management** — `POST /api/auth/keys` to mint new scoped keys (admin only).
+- Frontend stores the API key in `localStorage` and auto-validates on page load.
+
+#### Vehicle Route Reconstruction
+- Enter a plate number → reconstructs its **full chronological journey** across the camera grid.
+- Calculates **distance** (Haversine), **duration**, and **estimated speed** between each camera hop.
+- **Speed anomaly detection** — flags segments where inferred speed exceeds 160 km/h.
+- **OSRM road-snapping** — queries `router.project-osrm.org` to snap the route to actual road geometry (GeoJSON polyline).
+- Rendered on an interactive **Leaflet map** with numbered sighting markers and a scrollable timeline.
+
+#### Watchlist Management
+- Add target vehicles by plate number, reason, and priority (Critical / High / Medium).
+- **Fuzzy OCR matching** — catches 1-character OCR confusion errors (e.g., `GJ01AB123B` vs `GJ01AB1238`).
+- **In-memory cache** refreshed every 60s from SQLite — zero DB hit per Kafka message.
+- **Watchlist siren alert** — a full-screen banner with audio beep fires instantly when a target is detected.
+- Soft-delete (deactivation) rather than hard delete — preserves audit trail.
+
+#### Section 65B Evidence Dossier
+- Generate a **court-admissible PDF** for any plate within a time range.
+- Includes: timestamped sightings log, camera name, GPS coordinates, embedded snapshot images.
+- **SHA-256 cryptographic hash** computed for each snapshot file — tamper evidence.
+- Auto-includes a **Section 65B Indian Evidence Act declaration** signed by the operator name.
+- PDF served as a file download directly from the browser.
+
+#### GIS Coverage Gap Analysis
+- Visualizes the camera network's **150m coverage radius** as green circles on a Leaflet map.
+- Identifies **blind spots** (camera pairs with 800m–2000m gaps) and marks them as red pulsing markers.
+- Suggests **recommended deployment locations** (midpoint of each gap pair) with amber pins.
+- Reports: km² covered, number of critical gaps, number of suggested new nodes.
+
+#### Cross-Camera Identity Resolution
+- When a plate is **unreadable on one camera** (low light, obstructed angle), the vehicle is logged as an **anonymous track** with its type and color.
+- When the same vehicle's plate is **successfully read on another camera**, Sentinel retroactively links all anonymous sightings of that vehicle type+color from the past 5 minutes.
+- **Merge banner** — a real-time notification appears in the dashboard with audio chord when a retroactive merge succeeds.
+- Anonymous tracks stored in `anonymous_vehicle_tracks` table with `resolved_plate`, `resolved_at`, and `resolved_camera` fields.
+
+---
+
+## Dashboard UI
+
+| Tab | Description |
+|-----|-------------|
+| **📡 Dashboard** | Live Leaflet camera map + real-time alert feed. Click any camera pin or use the quick-select dropdown to open the stream viewer. |
+| **🗺️ Route Tracker** | Vehicle journey reconstruction — enter a plate, get a map + timeline. |
+| **🔴 Watchlist** | Target vehicle management — add/remove targets, view active watchlist. |
+| **📋 Evidence** | Section 65B PDF dossier generator with SHA-256 integrity hashes. |
+| **🛰️ Coverage** | GIS gap analysis — coverage circles, blind spots, suggested deployments. |
+| **🔄 Cross-Cam** | Anonymous vehicle tracking and cross-camera identity resolution. |
+
+---
+
+## API Reference
+
+### Core Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/` | — | Serves the dashboard frontend |
+| `GET` | `/api/stats` | — | Summary stats (cameras, alerts today, unique plates, total detections, active extractions) |
+| `GET` | `/api/cameras` | ✅ Key | All cameras with status, coordinates, last seen |
+| `GET` | `/api/alerts` | — | Recent ANPR alerts with optional `?camera_id=`, `?plate=`, `?limit=` filters. Deduplicated per plate. |
+| `GET` | `/api/alerts/search` | — | Full-text plate search (partial match) |
+| `WS` | `/ws/alerts` | — | Real-time WebSocket alert stream |
+
+### Camera Streaming & Extraction
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/cameras/{id}/snapshot` | Single JPEG snapshot (lightweight, no continuous stream) |
+| `GET` | `/api/cameras/{id}/stream` | MJPEG continuous live stream (multipart/x-mixed-replace) |
+| `POST` | `/api/cameras/{id}/extract/start` | Activate on-demand AI extraction for this camera |
+| `POST` | `/api/cameras/{id}/extract/stop` | Deactivate extraction, free CPU |
+| `GET` | `/api/cameras/{id}/extract/status` | Is extraction currently active? |
+| `GET` | `/api/cameras/{id}/alerts` | Recent alerts specifically for this camera (merged with in-memory) |
+| `GET` | `/api/cameras/extractions` | List all currently active extraction camera IDs |
+| `GET` | `/api/streams/active` | Cameras with live viewers or active extraction |
+
+### RBAC
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/auth/validate` | ✅ Key | Validate key — returns role and department |
+| `POST` | `/api/auth/keys` | ✅ Admin | Mint a new scoped API key |
+
+### Feature APIs
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/vehicles/track` | Route reconstruction for a plate number |
+| `GET` | `/api/watchlist` | List active watchlist targets |
+| `POST` | `/api/watchlist` | Add / re-activate a target plate |
+| `DELETE` | `/api/watchlist/{plate}` | Soft-delete a target plate |
+| `POST` | `/api/evidence/generate` | Generate Section 65B PDF dossier |
+| `GET` | `/api/cameras/coverage-analysis` | GIS gap analysis (blind spots + recommendations) |
+| `GET` | `/api/anonymous-tracks` | Cross-camera anonymous vehicle tracks (`?resolved=true/false`) |
+| `POST` | `/api/internal/watchlist-hit` | Internal: consumer → API WebSocket broadcast hook |
+
+---
+
+## Database Schema
+
+```sql
+-- One row per physical camera
+camera_registry (
+    camera_id TEXT PRIMARY KEY,
+    department_id TEXT,
+    camera_name TEXT,
+    latitude REAL, longitude REAL,
+    status TEXT,  -- 'idle' | 'streaming' | 'extracting' | 'reconnecting' | 'offline'
+    last_seen TEXT,
+    registered_at TEXT
+)
+
+-- One row per (camera, plate, timestamp) detection event
+anpr_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    camera_id TEXT REFERENCES camera_registry,
+    plate_number TEXT NOT NULL,
+    confidence REAL,
+    snapshot_path TEXT,   -- relative URL e.g. /snapshots/cam01/1234567_GJ01AB1234.jpg
+    detected_at TEXT NOT NULL,
+    ingested_at TEXT,
+    vehicle_type TEXT,
+    vehicle_color TEXT,
+    UNIQUE (camera_id, plate_number, detected_at)
+)
+
+-- SHA-256 hashed API keys for RBAC
+api_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key_hash TEXT UNIQUE NOT NULL,
+    label TEXT NOT NULL,
+    department TEXT NOT NULL DEFAULT 'ALL',
+    role TEXT NOT NULL DEFAULT 'operator',  -- 'admin' | 'operator'
+    created_at TEXT
+)
+
+-- Target vehicles for real-time matching
+watchlist_vehicles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plate_number TEXT UNIQUE NOT NULL,
+    reason TEXT,
+    priority TEXT DEFAULT 'high',  -- 'critical' | 'high' | 'medium'
+    added_at DATETIME,
+    is_active BOOLEAN DEFAULT 1
+)
+
+-- Anonymous vehicle sightings for cross-camera resolution
+anonymous_vehicle_tracks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    anon_id TEXT NOT NULL,        -- e.g. 'ANON-cam12-RedSedan-A3F1B2'
+    camera_id TEXT NOT NULL,
+    vehicle_type TEXT,
+    vehicle_color TEXT,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    resolved_plate TEXT,          -- filled when retroactively matched
+    resolved_at TEXT,
+    resolved_camera TEXT
+)
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Edge (Layers 1–3)                                      │
-│  orchestrator → stream_worker → ai_worker → kafka_pub   │
-│                                          │              │
-│                                   Kafka (localhost:9092) │
-└───────────────────────────────────────────│──────────────┘
-                                           │
-┌───────────────────────────────────────────│──────────────┐
-│  Cloud (Layer 4)                         ▼              │
-│                                    consumer.py          │
-│                                       │                 │
-│                                  PostGIS (5432)         │
-│                                       │                 │
-│                                    api.py → Dashboard   │
-│                                            (port 8000)  │
-└─────────────────────────────────────────────────────────┘
+
+---
+
+## File Reference
+
+| File | Layer | Purpose |
+|------|-------|---------|
+| `src/orchestrator.py` | 1+2 | Spawns and supervises all stream workers and AI workers. Enforces resource ceiling, runs stall watchdog for both layers. |
+| `src/stream_worker.py` | 1 | Per-camera isolated process: RTSP connect, throttle-decode, bounded-queue emit, backoff/reconnect. Includes `mock://` synthetic source. |
+| `src/ai_worker.py` | 2 | Model loading (YOLOv8n + EasyOCR/fast-alpr), round-robin queue consumption, vehicle detection, plate OCR + glyph correction, dedup, snapshot saving, JSON payload emission. |
+| `src/kafka_publisher.py` | 3 | Fault-tolerant Kafka producer: async send, SQLite spill on disconnect, auto-drain on reconnect. |
+| `src/consumer.py` | 4 | Kafka-to-SQLite consumer: subscribes to `traffic-anpr-alerts` and `camera-heartbeats`, idempotent inserts, camera upserts, watchlist hit detection + fuzzy OCR matching, WebSocket broadcast hook. |
+| `src/api.py` | 4 | FastAPI application: all REST/WebSocket endpoints, on-demand extraction engine, MJPEG streaming, RBAC, cross-camera identity resolution, global background mock extraction loop. |
+| `src/routes_vehicle.py` | 4 | Route reconstruction API — Haversine distance/speed calculation, OSRM road-snapping. |
+| `src/watchlist_api.py` | 4 | Watchlist CRUD API — add, list, soft-delete target plates. |
+| `src/evidence_api.py` | 4 | Section 65B PDF dossier generator — SHA-256 snapshot hashing, ReportLab PDF with sightings log and legal declaration. |
+| `src/gap_analysis_api.py` | 4 | GIS coverage gap analysis — Haversine-based blind-spot detection, deployment recommendations. |
+| `src/static/index.html` | 4 | Single-file dashboard frontend: Leaflet maps, WebSocket alert feed, MJPEG/HLS stream modal, route tracker, watchlist, evidence form, coverage map, cross-camera merge banners. |
+| `config/cameras.yaml` | — | Real per-department camera configuration (RTSP URLs, lat/lng, department IDs). |
+| `config/demo_cameras.yaml` | — | Synthetic demo config using `mock://` URLs — runs without any hardware. |
+| `config/live_cameras.yaml` | — | Live production camera config for the RTSP gateway (`stream.corp8.cloud`). |
+| `docker-compose.yml` | — | Spins up Zookeeper, Kafka (with topic initialization), and PostGIS for local development. |
+| `.env` / `.env.example` | — | RTSP gateway credentials (`RTSP_AUTH_EMAIL`, `RTSP_AUTH_PASSWORD`). |
+
+---
+
+## Setup & Running
+
+### Prerequisites
+
+```bash
+pip install -r requirements.txt
 ```
 
-### Design decisions
+Key dependencies:
+- `ultralytics` — YOLOv8n vehicle detection
+- `easyocr` + `fast-alpr[onnx]` — plate OCR engines
+- `fastapi` + `uvicorn` — dashboard API server
+- `confluent-kafka` — Kafka producer/consumer
+- `reportlab` — PDF evidence dossier generation
+- `opencv-python` — RTSP decoding, frame generation
 
-| Decision | Reasoning |
-|---|---|
-| **Separate consumer and API processes** | The Kafka consumer writes to the DB continuously; the API reads from it on demand. Either can be restarted independently without disrupting the other. No in-process coupling. |
-| **Idempotent inserts (ON CONFLICT DO NOTHING)** | Kafka's at-least-once delivery means duplicates can arrive. The UNIQUE constraint on `(camera_id, plate_number, detected_at)` silently absorbs them. |
-| **WebSocket for live alerts, REST for initial load** | The dashboard gets an initial snapshot via `GET /api/alerts`, then switches to the WebSocket for real-time push. No polling overhead, but graceful fallback. |
-| **PostGIS geometry column for camera locations** | Enables spatial queries (nearest-camera, bounding-box search) directly in SQL — critical for a map-based dashboard and future spatial analytics. |
-| **DB retry-on-startup** | `consumer.py` retries the PostGIS connection up to 10 times with 3s backoff, handling the race condition when `docker-compose up` starts both services simultaneously. |
+### Option A — Full Demo (No Hardware)
 
-### Running it
+```bash
+# Terminal 1: Start the dashboard API
+cd files/src
+uvicorn api:app --host 0.0.0.0 --port 8000
 
-1. **Start infrastructure** (Kafka + PostGIS):
+# Terminal 2: Start the edge pipeline (mock cameras)
+cd files/src
+python orchestrator.py ../config/demo_cameras.yaml
+```
+
+Open **http://localhost:8000** — the bootstrap admin API key is printed to Terminal 1 on first run.
+
+### Option B — With Real Cameras
+
+1. Copy `.env.example` to `.env` and set your RTSP gateway credentials:
+   ```
+   RTSP_AUTH_EMAIL=your@email.com
+   RTSP_AUTH_PASSWORD=yourpassword
+   ```
+
+2. Edit `config/live_cameras.yaml` with your camera IDs, RTSP URLs, and GPS coordinates.
+
+3. Start infrastructure (Kafka + PostGIS):
    ```bash
    docker-compose up -d
    ```
 
-2. **Start the Kafka-to-PostGIS consumer** (in a separate terminal):
+4. Start all services:
    ```bash
-   cd src
-   python consumer.py
+   # Edge pipeline (on each department server)
+   python src/orchestrator.py config/live_cameras.yaml
+
+   # Cloud consumer (central server)
+   python src/consumer.py
+
+   # Dashboard API (central server)
+   uvicorn src.api:app --host 0.0.0.0 --port 8000
    ```
 
-3. **Start the dashboard API** (in another terminal):
-   ```bash
-   cd src
-   uvicorn api:app --host 0.0.0.0 --port 8000 --reload
-   ```
+### API Key Flow
 
-4. **Open the dashboard**: http://localhost:8000
+On first startup, the bootstrap admin key is printed to console **once**:
+```
+============================================================
+  [SENTINEL] BOOTSTRAP API KEY (save this — shown only once!)
+  Key:   <raw-key>
+  Role:  admin (sees ALL departments)
+============================================================
+```
 
-5. **Start the edge pipeline** (generates data):
-   ```bash
-   cd src
-   python orchestrator.py ../config/demo_cameras.yaml
-   ```
+Enter this key in the dashboard's top-right input and click **Connect**. To mint department-scoped operator keys:
 
-### API endpoints
+```bash
+curl -X POST http://localhost:8000/api/auth/keys \
+  -H "X-API-Key: <admin-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"label": "AHM Traffic Ops", "department": "GJ-AHM-TRAFFIC-01", "role": "operator"}'
+```
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/cameras` | All cameras with status and location |
-| `GET` | `/api/alerts?limit=50&camera_id=...&plate=...` | Recent ANPR alerts with optional filters |
-| `GET` | `/api/stats` | Dashboard summary (totals, today's counts) |
-| `WS`  | `/ws/alerts` | Real-time alert push (new detections every ~2s) |
-| `GET` | `/` | Dashboard frontend |
+---
+
+## Design Decisions
+
+### Why SQLite, not PostGIS?
+
+The original architecture targeted PostGIS for spatial queries. For the current deployment model — where the API and consumer run on the same host — SQLite with WAL mode provides:
+- Zero separate DB process to manage
+- Haversine calculations in Python replace `ST_DistanceSphere`
+- `ON CONFLICT DO NOTHING` still gives idempotent inserts
+- Easy to migrate to PostgreSQL/PostGIS when the deployment scales
+
+### Why On-Demand Extraction Instead of Always-On?
+
+Running YOLOv8 on 30+ simultaneous RTSP streams causes OOM crashes on the central server. The on-demand model means:
+- Idle cameras use ~0% CPU
+- Maximum 2 simultaneous AI inference sessions (configurable)
+- The user's browser click is the trigger — computation follows attention, not the other way around
+
+### Why a Per-Camera Worker Thread?
+
+Camera sessions run as Python threads rather than subprocesses in Layer 4 because:
+- The MJPEG generator is an async generator in the FastAPI event loop
+- Thread-based sessions allow the async event loop to yield frames without blocking
+- The RLock on each session prevents race conditions between the MJPEG reader, the AI inference caller, and the background idle-reclaim logic
+
+### Why `INSERT OR IGNORE` + UNIQUE constraint?
+
+Kafka's at-least-once delivery means the same plate detection can arrive multiple times. The `UNIQUE(camera_id, plate_number, detected_at)` constraint silently absorbs duplicates without any application-level deduplication overhead.
+
+---
+
+## Known Limitations
+
+- Plate OCR accuracy on real traffic footage (low light, motion blur, oblique angles, dirty plates) has not been benchmarked — only clean, frontal, well-lit frames have been verified.
+- The positional glyph-confusion correction assumes the common 10-character `LLDDLLDDDD` Indian plate format. BH-series plates, shorter RTO codes, and non-standard formats are left uncorrected.
+- EasyOCR downloads ~65MB of recognition models from GitHub on first run — the first startup on a fresh server is slow.
+- The OSRM road-snapping call in route reconstruction is synchronous with a 3s timeout — under load this can add latency.
+- The `@app.on_event("startup")` FastAPI lifecycle hook is deprecated in FastAPI 0.93+; migration to `lifespan` is pending.
