@@ -2872,19 +2872,19 @@
         const footerText = document.getElementById('stream-footer-text');
 
         if (currentModalLiveStream) {
+            // ── Turn OFF live ──────────────────────────────────────────
             currentModalLiveStream = false;
+
+            // Stop any HLS instance
+            if (window.hls) { window.hls.destroy(); window.hls = null; }
+            video.pause(); video.src = '';
             video.style.display = 'none';
-            video.pause();
-            if (window.hls) {
-                window.hls.destroy();
-                window.hls = null;
-            }
-            video.src = '';
-            
-            img.src = '';
+
+            // Show snapshot
             img.style.display = 'block';
             img.classList.add('snapshot-mode');
             img.src = `${API_BASE}/api/cameras/${currentModalCameraId}/snapshot?t=${Date.now()}`;
+
             if (liveToggle) liveToggle.className = 'stream-live-badge';
             if (liveToggleText) liveToggleText.textContent = 'LIVE OFF';
             if (footerText) footerText.textContent = 'Snapshot Preview · Tap LIVE for direct stream';
@@ -2895,58 +2895,73 @@
                     img.src = `${API_BASE}/api/cameras/${currentModalCameraId}/snapshot?t=${Date.now()}`;
                 }
             }, 3000);
+
         } else {
+            // ── Turn ON live ───────────────────────────────────────────
             currentModalLiveStream = true;
-            if (_snapshotRefreshInterval) {
-                clearInterval(_snapshotRefreshInterval);
-                _snapshotRefreshInterval = null;
-            }
-            img.style.display = 'none';
-            video.style.display = 'block';
-            
-            const hlsUrl = `https://cctv.corp8.cloud/${currentModalCameraId}/index.m3u8`;
-            
-            if (Hls.isSupported()) {
-                const hls = new Hls({
-                    maxMaxBufferLength: 10,
-                    xhrSetup: function(xhr) {
-                        xhr.withCredentials = true;
-                    }
-                });
-                window.hls = hls;
-                hls.loadSource(hlsUrl);
-                hls.attachMedia(video);
-                hls.on(Hls.Events.MANIFEST_PARSED, function() {
-                    video.play().catch(e => console.warn('Autoplay prevented:', e));
-                });
-                hls.on(Hls.Events.ERROR, function(event, data) {
-                    if (data.fatal) {
-                        hls.destroy();
-                        window.hls = null;
-                        video.style.display = 'none';
-                        img.style.display = 'block';
-                        img.classList.remove('snapshot-mode');
-                        img.src = `${API_BASE}/api/cameras/${currentModalCameraId}/stream?t=${Date.now()}`;
-                        if (footerText) footerText.textContent = 'Falling back to MJPEG Proxy Stream';
-                    }
-                });
-            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                video.src = hlsUrl;
-                video.addEventListener('error', function() {
-                    video.style.display = 'none';
-                    img.style.display = 'block';
-                    img.classList.remove('snapshot-mode');
-                    img.src = `${API_BASE}/api/cameras/${currentModalCameraId}/stream?t=${Date.now()}`;
-                    if (footerText) footerText.textContent = 'Falling back to MJPEG Proxy Stream';
-                });
-                video.addEventListener('loadedmetadata', function() {
-                    video.play().catch(e => console.warn('Autoplay prevented:', e));
-                });
-            }
-            
+
+            if (_snapshotRefreshInterval) { clearInterval(_snapshotRefreshInterval); _snapshotRefreshInterval = null; }
+
+            // 1. IMMEDIATELY show MJPEG stream from our backend — this always works
+            //    (shows real RTSP footage when credentials are set, or tactical sim frame otherwise)
+            img.style.display = 'block';
+            img.classList.remove('snapshot-mode');
+            video.style.display = 'none';
+
+            // Cache-bust so the browser re-requests the stream
+            img.src = `${API_BASE}/api/cameras/${currentModalCameraId}/stream?t=${Date.now()}`;
+
             if (liveToggle) liveToggle.className = 'stream-live-badge active';
             if (liveToggleText) liveToggleText.textContent = 'LIVE';
-            if (footerText) footerText.textContent = 'High-Speed Stream · Dynamic AI Active';
+            if (footerText) footerText.textContent = '📡 Live MJPEG Stream · Connecting…';
+
+            // 2. In parallel, try to upgrade to HLS (higher quality, lower latency)
+            const hlsUrl = `https://cctv.corp8.cloud/${currentModalCameraId}/index.m3u8`;
+            if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+                const hlsInst = new Hls({ maxMaxBufferLength: 10 });
+                window.hls = hlsInst;
+
+                hlsInst.on(Hls.Events.MANIFEST_PARSED, function () {
+                    // HLS manifest loaded — switch to video element
+                    img.style.display = 'none';
+                    video.style.display = 'block';
+                    video.play().catch(e => console.warn('Autoplay prevented:', e));
+                    if (footerText) footerText.textContent = '⚡ HLS High-Speed Stream · Dynamic AI Active';
+                });
+
+                hlsInst.on(Hls.Events.ERROR, function (event, data) {
+                    if (data.fatal) {
+                        // HLS failed — fall back to already-running MJPEG stream
+                        hlsInst.destroy(); window.hls = null;
+                        video.style.display = 'none';
+                        img.style.display = 'block';
+                        img.src = `${API_BASE}/api/cameras/${currentModalCameraId}/stream?t=${Date.now()}`;
+                        if (footerText) footerText.textContent = '📡 Live MJPEG Proxy Stream · AI Active';
+                    }
+                });
+
+                // Start loading — but only if we're still in live mode
+                if (currentModalLiveStream) {
+                    hlsInst.loadSource(hlsUrl);
+                    hlsInst.attachMedia(video);
+                }
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Safari native HLS
+                video.src = hlsUrl;
+                video.addEventListener('loadedmetadata', () => {
+                    img.style.display = 'none';
+                    video.style.display = 'block';
+                    video.play().catch(e => console.warn('Autoplay prevented:', e));
+                    if (footerText) footerText.textContent = '⚡ HLS High-Speed Stream · Dynamic AI Active';
+                }, { once: true });
+                video.addEventListener('error', () => {
+                    video.style.display = 'none';
+                    img.style.display = 'block';
+                    img.src = `${API_BASE}/api/cameras/${currentModalCameraId}/stream?t=${Date.now()}`;
+                    if (footerText) footerText.textContent = '📡 Live MJPEG Proxy Stream · AI Active';
+                }, { once: true });
+            }
+            // If no HLS support at all, the MJPEG stream from step 1 is already running
         }
     }
 
