@@ -1923,6 +1923,9 @@
                     <button class="nav-tab" data-tab="tracks" onclick="switchTab('tracks')">
                         <span class="tab-num">06.</span> CROSS-CAM
                     </button>
+                    <button class="nav-tab action-tab" onclick="openAddCameraModal()" style="margin-left: auto; color: var(--accent-blue); font-weight: 700;">
+                        + NEW REGISTRY
+                    </button>
                 </nav>
             </div>
         </header>
@@ -3565,6 +3568,102 @@
             fetchAlerts();
         }, POLL_INTERVAL_MS);
     });
+    </script>
+
+    <!-- Add Camera Modal -->
+    <div class="stream-overlay" id="add-camera-modal" onclick="closeAddCameraModal(event)" style="display:none; z-index:9999;">
+        <div class="stream-modal" style="max-width: 500px;" onclick="event.stopPropagation()">
+            <div class="stream-modal-header">
+                <div class="stream-modal-title"><h3>Register New Camera</h3></div>
+                <button class="stream-close-btn" onclick="closeAddCameraModal()">✕</button>
+            </div>
+            <div class="stream-modal-body" style="padding: 16px;">
+                <form id="add-camera-form" onsubmit="submitAddCameraForm(event)">
+                    <div style="margin-bottom: 12px;">
+                        <label style="display:block; color:#64748b; margin-bottom:4px; font-size:0.85rem; font-weight: 600;">Camera ID</label>
+                        <input type="text" id="cam_id" required style="width:100%; padding:8px; background:#fff; border:1px solid #e2e8f0; color:#1e293b; border-radius:4px;" placeholder="e.g. CAM-XYZ">
+                    </div>
+                    <div style="margin-bottom: 12px;">
+                        <label style="display:block; color:#64748b; margin-bottom:4px; font-size:0.85rem; font-weight: 600;">Camera Name</label>
+                        <input type="text" id="cam_name" required style="width:100%; padding:8px; background:#fff; border:1px solid #e2e8f0; color:#1e293b; border-radius:4px;" placeholder="e.g. North Gate">
+                    </div>
+                    <div style="margin-bottom: 12px; display:flex; gap:12px;">
+                        <div style="flex:1;">
+                            <label style="display:block; color:#64748b; margin-bottom:4px; font-size:0.85rem; font-weight: 600;">Latitude (Location)</label>
+                            <input type="number" step="any" id="cam_lat" style="width:100%; padding:8px; background:#fff; border:1px solid #e2e8f0; color:#1e293b; border-radius:4px;" placeholder="37.7749">
+                        </div>
+                        <div style="flex:1;">
+                            <label style="display:block; color:#64748b; margin-bottom:4px; font-size:0.85rem; font-weight: 600;">Longitude (Location)</label>
+                            <input type="number" step="any" id="cam_lng" style="width:100%; padding:8px; background:#fff; border:1px solid #e2e8f0; color:#1e293b; border-radius:4px;" placeholder="-122.4194">
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 12px;">
+                        <label style="display:block; color:#64748b; margin-bottom:4px; font-size:0.85rem; font-weight: 600;">Pincode</label>
+                        <input type="text" id="cam_pincode" style="width:100%; padding:8px; background:#fff; border:1px solid #e2e8f0; color:#1e293b; border-radius:4px;" placeholder="e.g. 94103">
+                    </div>
+                    <div style="margin-bottom: 24px;">
+                        <label style="display:block; color:#64748b; margin-bottom:4px; font-size:0.85rem; font-weight: 600;">RTSP Link</label>
+                        <input type="text" id="cam_rtsp" required style="width:100%; padding:8px; background:#fff; border:1px solid #e2e8f0; color:#1e293b; border-radius:4px;" placeholder="rtsp://user:pass@ip:port/stream">
+                    </div>
+                    <div style="display:flex; justify-content:flex-end; gap:12px;">
+                        <button type="button" class="btn-secondary" onclick="closeAddCameraModal()">Cancel</button>
+                        <button type="submit" class="btn-primary">Register Camera</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function openAddCameraModal() {
+            const modal = document.getElementById('add-camera-modal');
+            modal.style.display = 'flex';
+            modal.style.alignItems = 'center';
+            modal.style.justifyContent = 'center';
+            modal.classList.add('active');
+        }
+        function closeAddCameraModal(event) {
+            if (event && event.target !== event.currentTarget) return;
+            const modal = document.getElementById('add-camera-modal');
+            modal.classList.remove('active');
+            setTimeout(() => { modal.style.display = 'none'; }, 200);
+            if (!event || event.type !== 'click') {
+                document.getElementById('add-camera-form').reset();
+            }
+        }
+        async function submitAddCameraForm(e) {
+            e.preventDefault();
+            const payload = {
+                camera_id: document.getElementById('cam_id').value,
+                camera_name: document.getElementById('cam_name').value,
+                latitude: parseFloat(document.getElementById('cam_lat').value) || null,
+                longitude: parseFloat(document.getElementById('cam_lng').value) || null,
+                pincode: document.getElementById('cam_pincode').value || null,
+                rtsp_url: document.getElementById('cam_rtsp').value
+            };
+            try {
+                let token = sessionStorage.getItem('sentinel_key') || 'admin';
+                const res = await fetch('/api/cameras', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + token
+                    },
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) {
+                    closeAddCameraModal();
+                    document.getElementById('add-camera-form').reset();
+                    if(typeof fetchCameras === 'function') fetchCameras();
+                } else {
+                    const err = await res.json();
+                    alert("Failed to register camera: " + (err.detail || err.message || "Unknown Error"));
+                }
+            } catch (error) {
+                console.error("Error registering camera:", error);
+                alert("Error registering camera.");
+            }
+        }
     </script>
 </body>
 </html>

@@ -1301,6 +1301,53 @@ async def shutdown():
 # REST Endpoints
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+class NewCameraRequest(BaseModel):
+    camera_id: str
+    camera_name: str
+    latitude: float = None
+    longitude: float = None
+    pincode: str = None
+    rtsp_url: str
+
+@app.post("/api/cameras")
+def register_camera(req: NewCameraRequest, key_info: dict = Depends(require_api_key)):
+    """Registers a new camera or updates an existing one (Admin only)"""
+    if key_info.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin role required to register cameras.")
+
+    conn = get_db()
+    try:
+        conn.execute(
+            """
+            INSERT INTO camera_registry (camera_id, department_id, camera_name, latitude, longitude, status, pincode, rtsp_url, last_seen)
+            VALUES (?, 'ALL', ?, ?, ?, 'active', ?, ?, datetime('now'))
+            ON CONFLICT(camera_id) DO UPDATE SET
+                camera_name=excluded.camera_name,
+                latitude=excluded.latitude,
+                longitude=excluded.longitude,
+                pincode=excluded.pincode,
+                rtsp_url=excluded.rtsp_url,
+                status='active',
+                last_seen=datetime('now')
+            """,
+            (req.camera_id, req.camera_name, req.latitude, req.longitude, req.pincode, req.rtsp_url)
+        )
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Failed to register camera: {e}")
+        raise HTTPException(status_code=500, detail="Database error while registering camera.")
+    finally:
+        conn.close()
+        
+    # Dynamically update the in-memory configurations without restart
+    CAMERA_CONFIGS[req.camera_id] = {
+        "camera_name": req.camera_name,
+        "location": {"lat": req.latitude, "lng": req.longitude}
+    }
+    CAMERA_RTSP_URLS[req.camera_id] = req.rtsp_url
+
+    return {"status": "success", "message": f"Camera {req.camera_id} registered successfully."}
+
 @app.get("/api/cameras")
 def get_cameras(key_info: dict = Depends(require_api_key)):
     """Returns registered cameras. Department operators see only their cameras; admins see all."""
@@ -1318,6 +1365,8 @@ def get_cameras(key_info: dict = Depends(require_api_key)):
                 longitude,
                 status,
                 last_seen,
+                pincode,
+                rtsp_url,
                 registered_at
             FROM camera_registry
         """

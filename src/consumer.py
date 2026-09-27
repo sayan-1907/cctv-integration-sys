@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS camera_registry (
     longitude       REAL,
     status          TEXT DEFAULT 'unknown',
     last_seen       TEXT,
+    pincode         TEXT,
+    rtsp_url        TEXT,
     registered_at   TEXT DEFAULT (datetime('now'))
 );
 
@@ -110,7 +112,13 @@ def init_schema(conn):
     except sqlite3.OperationalError:
         # Columns likely already exist
         pass
-        
+
+    try:
+        conn.execute("ALTER TABLE camera_registry ADD COLUMN pincode TEXT")
+        conn.execute("ALTER TABLE camera_registry ADD COLUMN rtsp_url TEXT")
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     logger.info("Database schema initialized")
 
