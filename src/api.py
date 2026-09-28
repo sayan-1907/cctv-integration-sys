@@ -291,6 +291,80 @@ def _mask_rtsp_url(url: str) -> str:
     return url
 
 
+# ── Corp8 HLS session cookie manager ─────────────────────────────────────────
+# The corp8 gateway serves HLS at https://cctv.corp8.cloud/<id>/index.m3u8.
+# Access requires the "sentinel" session cookie obtained by POSTing
+# email+password to /auth/login.
+
+_corp8_cookie_lock = threading.Lock()
+_corp8_session_cookie: Optional[str] = None
+_corp8_cookie_fetched_at: float = 0.0
+CORP8_COOKIE_TTL_S = 3600  # Refresh every hour
+
+
+def _ensure_corp8_cookie() -> Optional[str]:
+    """
+    Return a valid sentinel cookie for cctv.corp8.cloud.
+    Logs in once, caches for 1 hour, then refreshes automatically.
+    """
+    global _corp8_session_cookie, _corp8_cookie_fetched_at
+    with _corp8_cookie_lock:
+        now = time.time()
+        if _corp8_session_cookie and (now - _corp8_cookie_fetched_at) < CORP8_COOKIE_TTL_S:
+            return _corp8_session_cookie
+
+        email = os.environ.get("RTSP_AUTH_EMAIL", "").strip()
+        password = os.environ.get("RTSP_AUTH_PASSWORD", "").strip()
+        if not email or not password or "your_email" in email:
+            return None
+
+        try:
+            import urllib.request as _ureq
+            import urllib.parse as _uparse
+            import urllib.error as _uerr
+
+            login_data = _uparse.urlencode({"email": email, "password": password}).encode()
+            req = _ureq.Request(
+                "https://cctv.corp8.cloud/auth/login",
+                data=login_data,
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Accept": "text/html,application/xhtml+xml,*/*;q=0.9",
+                    "Origin": "https://cctv.corp8.cloud",
+                    "Referer": "https://cctv.corp8.cloud/auth/login",
+                },
+            )
+            try:
+                resp = _ureq.urlopen(req, timeout=15)
+                set_cookie = resp.headers.get("Set-Cookie", "")
+            except _uerr.HTTPError as e:
+                set_cookie = e.headers.get("Set-Cookie", "")
+
+            # Parse sentinel= out of the Set-Cookie header
+            for chunk in set_cookie.split(";"):
+                chunk = chunk.strip()
+                if chunk.startswith("sentinel="):
+                    cookie_val = chunk.split("=", 1)[1]
+                    _corp8_session_cookie = cookie_val
+                    _corp8_cookie_fetched_at = now
+                    logger.info("[CORP8] HLS session cookie obtained (valid for 1h)")
+                    return cookie_val
+
+            logger.warning("[CORP8] Login succeeded but no sentinel cookie in response")
+        except Exception as exc:
+            logger.warning("[CORP8] Failed to obtain HLS session cookie: %s", exc)
+
+        return None
+
+
+def _invalidate_corp8_cookie():
+    """Force a cookie refresh on the next call to _ensure_corp8_cookie()."""
+    global _corp8_cookie_fetched_at
+    with _corp8_cookie_lock:
+        _corp8_cookie_fetched_at = 0.0
+
+
 # Per-camera plate dedup window (seconds). Much longer than the Layer 2
 # pipeline's 10s window because the simulated extraction cycles through
 # the candidate pool fast and re-emits the same plates repeatedly.
@@ -602,10 +676,8 @@ class CameraSession:
         logger.info("[%s] Worker loop running (source=%s)", self.camera_id, _mask_rtsp_url(self.rtsp_url))
         cap = None
         last_connect_attempt = 0.0
-        connect_cooldown = 3.5  # Attempt to reconnect every 3.5s
-
-        import os
-        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|timeout;2000000"
+        connect_cooldown = 5.0  # Seconds between reconnect attempts
+        _using_hls = False       # Track which protocol is active
 
         frame_interval = 1.0 / MAX_STREAM_FPS
         encode_params = [cv2.IMWRITE_JPEG_QUALITY, STREAM_JPEG_QUALITY]
@@ -615,32 +687,70 @@ class CameraSession:
             frame = None
             current_pts = 0.0
 
-            # Attempt to connect or reconnect to RTSP feed
+            # ── Reconnect logic ───────────────────────────────────────────────
             if cap is None or not cap.isOpened():
                 if t0 - last_connect_attempt >= connect_cooldown:
                     last_connect_attempt = t0
-                    
-                    # Skip connection attempt if using dummy credentials or mock to avoid blocking
-                    if "your_email" in str(self.rtsp_url) or str(self.rtsp_url).startswith("mock://"):
-                        cap = None
+
+                    is_dummy = ("your_email" in str(self.rtsp_url)
+                                or str(self.rtsp_url).startswith("mock://")
+                                or not self.rtsp_url)
+                    if is_dummy:
                         self.in_mock_fallback = True
                     else:
-                        try:
-                            cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
-                            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                            if cap.isOpened():
-                                logger.info("[%s] Successfully connected to live RTSP feed!", self.camera_id)
-                                self.in_mock_fallback = False
-                            else:
-                                cap.release()
-                                cap = None
-                                self.in_mock_fallback = True
-                        except Exception as e:
-                            logger.warning("[%s] RTSP connect exception: %s", self.camera_id, e)
-                            cap = None
-                            self.in_mock_fallback = True
+                        cap = None
+                        _using_hls = False
 
-            # If cap is open, grab and read real camera frame
+                        # ── Strategy 1: HLS via cctv.corp8.cloud + session cookie ──
+                        # The corp8 docs recommend HLS for remote / dashboard use.
+                        # Auth is via the "sentinel" cookie obtained by logging in.
+                        hls_url = f"https://cctv.corp8.cloud/{self.camera_id}/index.m3u8"
+                        cookie = _ensure_corp8_cookie()
+                        if cookie:
+                            try:
+                                # Pass session cookie as an HTTP header to FFmpeg
+                                cookie_header = f"Cookie: sentinel={cookie}\r\n"
+                                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+                                    f"headers;{cookie_header}"
+                                    "protocol_whitelist;file,crypto,data,http,https,tcp,tls"
+                                )
+                                cap_hls = cv2.VideoCapture(hls_url, cv2.CAP_FFMPEG)
+                                if cap_hls.isOpened():
+                                    cap = cap_hls
+                                    _using_hls = True
+                                    self.in_mock_fallback = False
+                                    logger.info("[%s] Connected via HLS (cctv.corp8.cloud) ✓", self.camera_id)
+                                else:
+                                    cap_hls.release()
+                                    # Cookie may have expired — force refresh next attempt
+                                    _invalidate_corp8_cookie()
+                                    logger.warning("[%s] HLS connection failed (cookie may be stale)", self.camera_id)
+                            except Exception as hls_exc:
+                                logger.warning("[%s] HLS connect exception: %s", self.camera_id, hls_exc)
+
+                        # ── Strategy 2: RTSP with credentials embedded in URL ──
+                        # Corp8 format: rtsp://email%40domain:password@103.250.160.189:8554/stream/<id>
+                        if cap is None:
+                            try:
+                                os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+                                    "rtsp_transport;tcp|timeout;4000000"
+                                )
+                                cap_rtsp = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
+                                cap_rtsp.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                                if cap_rtsp.isOpened():
+                                    cap = cap_rtsp
+                                    _using_hls = False
+                                    self.in_mock_fallback = False
+                                    logger.info("[%s] Connected via RTSP ✓", self.camera_id)
+                                else:
+                                    cap_rtsp.release()
+                                    self.in_mock_fallback = True
+                                    logger.warning("[%s] RTSP connection failed (401 or unreachable)", self.camera_id)
+                            except Exception as rtsp_exc:
+                                logger.warning("[%s] RTSP connect exception: %s", self.camera_id, rtsp_exc)
+                                self.in_mock_fallback = True
+
+            # ── Read frame from active capture ────────────────────────────────
             if cap is not None and cap.isOpened():
                 ret, raw_frame = cap.read()
                 current_pts = cap.get(cv2.CAP_PROP_POS_MSEC)
@@ -648,15 +758,20 @@ class CameraSession:
                     frame = raw_frame
                     self.in_mock_fallback = False
                 else:
-                    logger.warning("[%s] Failed to read frame from RTSP stream, will reconnect", self.camera_id)
+                    proto = "HLS" if _using_hls else "RTSP"
+                    logger.warning("[%s] Failed to read %s frame — will reconnect", self.camera_id, proto)
                     cap.release()
                     cap = None
                     self.in_mock_fallback = True
 
-            # If no live frame available, render tactical frame with animations
+            # ── Fallback: animated tactical frame ─────────────────────────────
             if frame is None:
                 self.in_mock_fallback = True
-                frame = generate_tactical_frame(self.camera_id, self.camera_name, self.frame_seq, self.is_extracting, self.current_plate_info)
+                frame = generate_tactical_frame(
+                    self.camera_id, self.camera_name,
+                    self.frame_seq, self.is_extracting,
+                    self.current_plate_info,
+                )
 
             self.frame_seq += 1
 
@@ -675,27 +790,30 @@ class CameraSession:
                 if now - self.last_inference_ts >= 2.5:
                     self.last_inference_ts = now
                     try:
-                        self.manager.trigger_extraction_event(self, frame, now, self.current_plate_info, pts_ms=current_pts)
+                        self.manager.trigger_extraction_event(
+                            self, frame, now, self.current_plate_info, pts_ms=current_pts
+                        )
                     except Exception as exc:
                         logger.error("[%s] Error during on-demand extraction: %s", self.camera_id, exc)
 
-            # If in mock fallback, cycle simulated plate every 80 frames
+            # Cycle simulated plate every 80 frames (mock fallback only)
             if self.in_mock_fallback and self.frame_seq % 80 == 0:
                 self.plate_idx = (self.plate_idx + 1) % len(CANDIDATE_PLATES)
                 self.current_plate_info = CANDIDATE_PLATES[self.plate_idx]
 
-            # Auto-reclaim: If no viewers and extraction is disabled, stop after 5s idle
+            # Auto-reclaim idle sessions
             if self.viewer_count <= 0 and not self.is_extracting:
                 if time.time() - self.last_activity > 5.0:
-                    logger.info("[%s] Idle timeout (no viewers, extraction off) — releasing worker", self.camera_id)
+                    logger.info("[%s] Idle timeout — releasing worker", self.camera_id)
                     break
 
             # Frame pacing
             elapsed_frame = time.time() - t0
-            if elapsed_frame < frame_interval:
-                time.sleep(frame_interval - elapsed_frame)
+            sleep_t = frame_interval - elapsed_frame
+            if sleep_t > 0:
+                time.sleep(sleep_t)
             else:
-                time.sleep(0.01)
+                time.sleep(0.005)
 
         if cap is not None:
             cap.release()
