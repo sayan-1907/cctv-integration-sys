@@ -16,7 +16,7 @@ Sentinel is a four-layer hybrid edge-cloud pipeline. Each layer has a strict con
 │   │   Layer 1        │     │   Layer 2          │     │   Layer 3        │   │
 │   │  Stream Worker   │────▶│   AI Worker        │────▶│  Kafka Publisher │   │
 │   │                  │     │                    │     │                  │   │
-│   │ • RTSP decode    │     │ • YOLOv8n vehicle  │     │ • Async produce  │   │
+│   │ • RTSP/HLS decode│     │ • YOLOv8n vehicle  │     │ • Async produce  │   │
 │   │ • 5 fps throttle │     │   detection        │     │ • SQLite spill   │   │
 │   │ • Bounded queue  │     │ • EasyOCR / ALPR   │     │   on disconnect  │   │
 │   │ • Auto-reconnect │     │ • Plate correction │     │ • Auto-drain on  │   │
@@ -41,20 +41,22 @@ Sentinel is a four-layer hybrid edge-cloud pipeline. Each layer has a strict con
 │   │ • Idempotent     │──────▶│  On-Demand AI Extraction Engine          │  │
 │   │   inserts        │        │  RBAC API-Key Authentication             │  │
 │   │ • Watchlist hit  │        │  Cross-Camera Identity Resolution        │  │
-│   │   detection      │        │                                          │  │
-│   │ • Fuzzy OCR      │        └──────────────┬───────────────────────────┘  │
-│   │   matching       │                       │                              │
-│   └────────┬─────────┘          ┌────────────▼──────────────────────────┐  │
-│            │                    │   index.html  (Dashboard Frontend)     │  │
-│            ▼                    │                                        │  │
-│       sentinel.db               │  • Live Leaflet camera map             │  │
-│      (SQLite / WAL)             │  • Real-time alert feed (WebSocket)    │  │
-│                                 │  • On-demand MJPEG stream viewer       │  │
+│   │   detection      │        │  HLS Session Cookie Manager              │  │
+│   │ • Fuzzy OCR      │        │                                          │  │
+│   │   matching       │        └──────────────┬───────────────────────────┘  │
+│   └────────┬─────────┘                       │                              │
+│            │                    ┌────────────▼──────────────────────────┐  │
+│            ▼                    │   index.html  (Dashboard Frontend)     │  │
+│       sentinel.db               │                                        │  │
+│      (SQLite / WAL)             │  • Live Leaflet camera map             │  │
+│                                 │  • Real-time alert feed (WebSocket)    │  │
+│                                 │  • On-demand MJPEG/HLS stream viewer   │  │
 │                                 │  • Vehicle route reconstruction        │  │
 │                                 │  • Watchlist management & siren        │  │
 │                                 │  • Section 65B evidence dossier (PDF)  │  │
 │                                 │  • GIS coverage gap analysis           │  │
 │                                 │  • Cross-camera identity merge alerts  │  │
+│                                 │  • Camera registry (add/manage cams)   │  │
 │                                 └────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -97,13 +99,20 @@ Sentinel is a four-layer hybrid edge-cloud pipeline. Each layer has a strict con
 - **Concurrency safety cap** (default: 2 simultaneous extractions). When the cap is hit, the oldest idle extraction is evicted.
 - **Auto-reclaim.** Camera worker threads shut down automatically after 5s with no viewers and no active extraction.
 
-#### Live Video Streaming
-- **MJPEG proxy stream** — single-pipeline shared decoder per camera, multiple viewers served from one thread.
-- **HLS direct CDN stream** — via `hls.js`, connects directly to `cctv.corp8.cloud/{camera_id}/index.m3u8` with low latency.
+#### Live Video Streaming — HLS-First Architecture
+- **HLS primary stream** — connects to the camera CDN gateway (`https://<host>/<id>/index.m3u8`) using an auto-managed session cookie. Session is obtained once at startup via web login and cached for 1 hour with automatic refresh.
+- **MJPEG fallback** — if HLS is unavailable, falls back to a server-side MJPEG proxy stream (multipart/x-mixed-replace) decoded from the RTSP source.
+- **Two-strategy connection logic:** HLS (recommended for dashboards) → RTSP → animated tactical mock frame.
+- **Session cookie manager** — `_ensure_corp8_cookie()` logs in automatically using `.env` credentials, caches the cookie for 1 hour, and invalidates on 403 to force a fresh login.
 - **Snapshot mode** (default) — lightweight single-JPEG refresh every 3s, no continuous stream overhead.
-- **Tactical standby frame** — professional CCTV-style diagnostic pattern when RTSP feed is offline/unauthorized.
-- **Simulated tactical frame** — animated vehicle overlay when RTSP offline and extraction is active (demo mode).
-- **RTSP credential injection** — `RTSP_AUTH_EMAIL` / `RTSP_AUTH_PASSWORD` from `.env` are URL-encoded and injected per-camera at startup.
+- **Tactical standby frame** — professional CCTV-style diagnostic pattern when no live feed is available.
+- **Simulated tactical frame** — animated vehicle overlay when in offline/demo mode with extraction active.
+
+#### Camera Registry
+- **Add new cameras from the dashboard** — admin users can register new cameras (ID, name, GPS coordinates, stream URL) without restarting the server.
+- **Live in-memory update** — newly registered cameras are immediately available for streaming and extraction without a server restart.
+- **REST API** (`POST /api/cameras`) — register or update cameras programmatically.
+- Cameras persist to `camera_registry` in SQLite and appear on the live map instantly.
 
 #### Real-Time Alert Feed
 - **WebSocket push** (`/ws/alerts`) — new detections broadcast to all connected browser clients within ~1.5s.
@@ -160,12 +169,12 @@ Sentinel is a four-layer hybrid edge-cloud pipeline. Each layer has a strict con
 
 | Tab | Description |
 |-----|-------------|
-| **📡 Dashboard** | Live Leaflet camera map + real-time alert feed. Click any camera pin or use the quick-select dropdown to open the stream viewer. |
-| **🗺️ Route Tracker** | Vehicle journey reconstruction — enter a plate, get a map + timeline. |
-| **🔴 Watchlist** | Target vehicle management — add/remove targets, view active watchlist. |
-| **📋 Evidence** | Section 65B PDF dossier generator with SHA-256 integrity hashes. |
-| **🛰️ Coverage** | GIS gap analysis — coverage circles, blind spots, suggested deployments. |
-| **🔄 Cross-Cam** | Anonymous vehicle tracking and cross-camera identity resolution. |
+| **📡 Dashboard** | Live Leaflet camera map + real-time alert feed. Click any camera pin or use the quick-select dropdown to open the stream viewer. Admins can register new cameras via the **+ Add Camera** button. |
+| **🗺️ Route Tracker** | Vehicle journey reconstruction — enter a plate, get a map + timeline with speed anomaly flags. |
+| **🔴 Watchlist** | Target vehicle management — add/remove targets with priority levels, instant siren alert on detection. |
+| **📋 Evidence** | Section 65B PDF dossier generator with SHA-256 integrity hashes for court use. |
+| **🛰️ Coverage** | GIS gap analysis — coverage circles, blind spots, suggested deployment locations. |
+| **🔄 Cross-Cam** | Anonymous vehicle tracking and cross-camera identity resolution with retroactive plate linking. |
 
 ---
 
@@ -178,6 +187,7 @@ Sentinel is a four-layer hybrid edge-cloud pipeline. Each layer has a strict con
 | `GET` | `/` | — | Serves the dashboard frontend |
 | `GET` | `/api/stats` | — | Summary stats (cameras, alerts today, unique plates, total detections, active extractions) |
 | `GET` | `/api/cameras` | ✅ Key | All cameras with status, coordinates, last seen |
+| `POST` | `/api/cameras` | ✅ Admin | Register or update a camera (live reload — no restart needed) |
 | `GET` | `/api/alerts` | — | Recent ANPR alerts with optional `?camera_id=`, `?plate=`, `?limit=` filters. Deduplicated per plate. |
 | `GET` | `/api/alerts/search` | — | Full-text plate search (partial match) |
 | `WS` | `/ws/alerts` | — | Real-time WebSocket alert stream |
@@ -228,6 +238,8 @@ camera_registry (
     latitude REAL, longitude REAL,
     status TEXT,  -- 'idle' | 'streaming' | 'extracting' | 'reconnecting' | 'offline'
     last_seen TEXT,
+    pincode TEXT,
+    rtsp_url TEXT,
     registered_at TEXT
 )
 
@@ -291,17 +303,17 @@ anonymous_vehicle_tracks (
 | `src/ai_worker.py` | 2 | Model loading (YOLOv8n + EasyOCR/fast-alpr), round-robin queue consumption, vehicle detection, plate OCR + glyph correction, dedup, snapshot saving, JSON payload emission. |
 | `src/kafka_publisher.py` | 3 | Fault-tolerant Kafka producer: async send, SQLite spill on disconnect, auto-drain on reconnect. |
 | `src/consumer.py` | 4 | Kafka-to-SQLite consumer: subscribes to `traffic-anpr-alerts` and `camera-heartbeats`, idempotent inserts, camera upserts, watchlist hit detection + fuzzy OCR matching, WebSocket broadcast hook. |
-| `src/api.py` | 4 | FastAPI application: all REST/WebSocket endpoints, on-demand extraction engine, MJPEG streaming, RBAC, cross-camera identity resolution, global background mock extraction loop. |
+| `src/api.py` | 4 | FastAPI application: all REST/WebSocket endpoints, on-demand extraction engine, HLS-first live streaming with session cookie manager, MJPEG fallback, RBAC, cross-camera identity resolution, camera registry, global background mock extraction loop. |
 | `src/routes_vehicle.py` | 4 | Route reconstruction API — Haversine distance/speed calculation, OSRM road-snapping. |
 | `src/watchlist_api.py` | 4 | Watchlist CRUD API — add, list, soft-delete target plates. |
 | `src/evidence_api.py` | 4 | Section 65B PDF dossier generator — SHA-256 snapshot hashing, ReportLab PDF with sightings log and legal declaration. |
 | `src/gap_analysis_api.py` | 4 | GIS coverage gap analysis — Haversine-based blind-spot detection, deployment recommendations. |
-| `src/static/index.html` | 4 | Single-file dashboard frontend: Leaflet maps, WebSocket alert feed, MJPEG/HLS stream modal, route tracker, watchlist, evidence form, coverage map, cross-camera merge banners. |
-| `config/cameras.yaml` | — | Real per-department camera configuration (RTSP URLs, lat/lng, department IDs). |
+| `src/static/index.html` | 4 | Single-file dashboard frontend: Leaflet maps, WebSocket alert feed, HLS/MJPEG stream modal, route tracker, watchlist, evidence form, coverage map, cross-camera merge banners, camera registry modal. |
+| `config/cameras.yaml` | — | Real per-department camera configuration (stream URLs, lat/lng, department IDs). |
 | `config/demo_cameras.yaml` | — | Synthetic demo config using `mock://` URLs — runs without any hardware. |
-| `config/live_cameras.yaml` | — | Live production camera config for the RTSP gateway (`stream.corp8.cloud`). |
+| `config/live_cameras.yaml` | — | Live production camera config for the CDN gateway. |
 | `docker-compose.yml` | — | Spins up Zookeeper, Kafka (with topic initialization), and PostGIS for local development. |
-| `.env` / `.env.example` | — | RTSP gateway credentials (`RTSP_AUTH_EMAIL`, `RTSP_AUTH_PASSWORD`). |
+| `.env` / `.env.example` | — | Gateway credentials (`RTSP_AUTH_EMAIL`, `RTSP_AUTH_PASSWORD`) used for both stream auth and HLS session login. |
 
 ---
 
@@ -319,48 +331,28 @@ Key dependencies:
 - `fastapi` + `uvicorn` — dashboard API server
 - `confluent-kafka` — Kafka producer/consumer
 - `reportlab` — PDF evidence dossier generation
-- `opencv-python` — RTSP decoding, frame generation
+- `opencv-python` — stream decoding and frame generation
 
-### Option A — Full Demo (No Hardware)
+### Quick Start (Windows)
 
-```bash
-# Terminal 1: Start the dashboard API
-cd files/src
-uvicorn api:app --host 0.0.0.0 --port 8000
-
-# Terminal 2: Start the edge pipeline (mock cameras)
-cd files/src
-python orchestrator.py ../config/demo_cameras.yaml
+```bat
+start_demo.bat
 ```
 
-Open **http://localhost:8000** — the bootstrap admin API key is printed to Terminal 1 on first run.
+This launches the API server and opens the dashboard in your browser at `http://localhost:8000`. The bootstrap admin API key is printed to the console on first run.
 
-### Option B — With Real Cameras
+### Credentials Setup
 
-1. Copy `.env.example` to `.env` and set your RTSP gateway credentials:
-   ```
-   RTSP_AUTH_EMAIL=your@email.com
-   RTSP_AUTH_PASSWORD=yourpassword
-   ```
+Copy `.env.example` to `.env` and fill in your gateway credentials:
 
-2. Edit `config/live_cameras.yaml` with your camera IDs, RTSP URLs, and GPS coordinates.
+```env
+RTSP_AUTH_EMAIL=your@email.com
+RTSP_AUTH_PASSWORD=yourpassword
+```
 
-3. Start infrastructure (Kafka + PostGIS):
-   ```bash
-   docker-compose up -d
-   ```
-
-4. Start all services:
-   ```bash
-   # Edge pipeline (on each department server)
-   python src/orchestrator.py config/live_cameras.yaml
-
-   # Cloud consumer (central server)
-   python src/consumer.py
-
-   # Dashboard API (central server)
-   uvicorn src.api:app --host 0.0.0.0 --port 8000
-   ```
+Sentinel uses these credentials to:
+1. Auto-login to the camera CDN and obtain a session cookie for HLS streaming
+2. Inject credentials into RTSP URLs as a fallback
 
 ### API Key Flow
 
@@ -396,10 +388,17 @@ The original architecture targeted PostGIS for spatial queries. For the current 
 
 ### Why On-Demand Extraction Instead of Always-On?
 
-Running YOLOv8 on 30+ simultaneous RTSP streams causes OOM crashes on the central server. The on-demand model means:
+Running YOLOv8 on 30+ simultaneous streams causes OOM crashes on the central server. The on-demand model means:
 - Idle cameras use ~0% CPU
 - Maximum 2 simultaneous AI inference sessions (configurable)
 - The user's browser click is the trigger — computation follows attention, not the other way around
+
+### Why HLS-First Streaming?
+
+The camera CDN gateway serves both HLS and RTSP. HLS is the recommended protocol for dashboards and remote AI workloads because:
+- It works through NAT, firewalls, and CDN proxies — no direct IP access needed
+- Auth via session cookie is stable across reconnects (cookie cached 1 hour)
+- RTSP is kept as a fallback for on-LAN/VPN deployments where direct IP access is available
 
 ### Why a Per-Camera Worker Thread?
 
@@ -421,3 +420,4 @@ Kafka's at-least-once delivery means the same plate detection can arrive multipl
 - EasyOCR downloads ~65MB of recognition models from GitHub on first run — the first startup on a fresh server is slow.
 - The OSRM road-snapping call in route reconstruction is synchronous with a 3s timeout — under load this can add latency.
 - The `@app.on_event("startup")` FastAPI lifecycle hook is deprecated in FastAPI 0.93+; migration to `lifespan` is pending.
+- HLS session cookie is obtained via a standard form POST login. If the gateway changes its auth mechanism, `_ensure_corp8_cookie()` in `api.py` will need updating.
